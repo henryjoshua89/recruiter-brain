@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { FormEvent, useMemo, useState } from "react";
 import type { BriefingSections, InternalContextPayload } from "@/lib/types";
 
@@ -338,7 +339,16 @@ export default function NewRoleWizard() {
         <div className="space-y-5">
           <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
             Briefing generated and saved to Supabase.
-            {roleId ? ` Role ID: ${roleId}` : ""}
+            {roleId ? (
+              <span className="mt-3 block">
+                <Link
+                  href={`/roles/${roleId}`}
+                  className="inline-flex items-center rounded-lg bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800"
+                >
+                  Open role workspace — analyse candidates →
+                </Link>
+              </span>
+            ) : null}
           </div>
 
           <Section title="Role Summary" content={briefing.roleSummary} />

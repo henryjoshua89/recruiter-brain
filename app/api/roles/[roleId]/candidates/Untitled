@@ -1,0 +1,5 @@
+if (contentType.includes("multipart/form-data")) {
+    const form = await request.formData();
+    const file = form.get("file") as File | null;
+    const pasted = form.get("resumeText");
+    forceNew = form.get("forceNew") === "true";

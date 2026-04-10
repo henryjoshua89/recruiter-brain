@@ -1,0 +1,13 @@
+-- Score transparency (JD / role fit breakdowns)
+--
+-- No new columns are required. Each breakdown is stored inside:
+--   candidates.analysis->'jdFitBreakdown'
+--   candidates.analysis->'roleFitBreakdown'
+--
+-- Shape (JSON):
+--   { "strengths": ["..."], "weaknesses": ["..."], "biggestFactor": "..." }
+--
+-- Existing candidate rows analysed before this feature will not have these keys;
+-- the app falls back to the stored jd_fit_rationale / role_fit_rationale text.
+--
+-- To backfill, re-run resume analysis for those candidates (or leave as-is).

@@ -1,4 +1,5 @@
 import NewRoleWizard from "@/components/new-role-wizard";
+import SavedRolesList from "@/components/saved-roles-list";
 
 export default function Home() {
   return (
@@ -13,8 +14,8 @@ export default function Home() {
               Recruiter Intelligence Dashboard
             </h1>
             <p className="mt-2 text-sm text-slate-700">
-              Phase 1: JD Comprehension Engine for faster intake and sharper
-              search direction.
+              Phase 1: JD Comprehension · Phase 2: Resume Analysis per saved
+              role.
             </p>
           </div>
           <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-900">
@@ -28,8 +29,8 @@ export default function Home() {
         {[
           {
             label: "Workflow",
-            value: "4 Steps",
-            description: "Company setup to full briefing output",
+            value: "Intake + resumes",
+            description: "Briefing intake then analyse candidates per role",
           },
           {
             label: "AI Model",
@@ -56,6 +57,8 @@ export default function Home() {
           </article>
         ))}
       </section>
+
+      <SavedRolesList />
 
       <NewRoleWizard />
     </main>
