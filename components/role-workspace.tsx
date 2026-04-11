@@ -228,6 +228,33 @@ export default function RoleWorkspace({ roleId }: { roleId: string }) {
     });
   }
 
+  async function handleCompareTop() {
+    const topIds = [...candidates]
+      .sort((a, b) => b.role_fit_score - a.role_fit_score)
+      .slice(0, 3)
+      .map((c) => c.id);
+    setCompareIds(topIds);
+    setCompareMaxError(false);
+    setComparisonRec(null);
+    setComparisonError(null);
+    setShowComparison(true);
+    setComparisonLoading(true);
+    try {
+      const res = await fetch(`/api/roles/${roleId}/compare`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ candidateIds: topIds }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Comparison failed.");
+      setComparisonRec(data.recommendation);
+    } catch (e) {
+      setComparisonError(e instanceof Error ? e.message : "Comparison failed.");
+    } finally {
+      setComparisonLoading(false);
+    }
+  }
+
   async function handleCompare() {
     setComparisonRec(null);
     setComparisonError(null);
@@ -585,11 +612,20 @@ export default function RoleWorkspace({ roleId }: { roleId: string }) {
                     Maximum 4 candidates can be compared at once.
                   </span>
                 ) : null}
+                {candidates.length > 0 ? (
+                  <button
+                    type="button"
+                    onClick={handleCompareTop}
+                    className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-700 shadow-sm"
+                  >
+                    ✦ Compare Top {Math.min(candidates.length, 3)}
+                  </button>
+                ) : null}
                 {compareIds.length >= 2 ? (
                   <button
                     type="button"
                     onClick={handleCompare}
-                    className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 shadow-sm"
+                    className="rounded-lg border border-blue-600 px-4 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50 shadow-sm"
                   >
                     Compare ({compareIds.length})
                   </button>
