@@ -81,7 +81,7 @@ export async function GET(
       .from("candidate_feedback")
       .select("candidate_id, feedback_type, reject_reason, created_at")
       .in("candidate_id", ids)
-      .order("jd_fit_score", { ascending: false });
+      .order("created_at", { ascending: false });
     feedback = fb ?? [];
   }
 

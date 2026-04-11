@@ -30,6 +30,7 @@ type DuplicateState = {
 
 export default function RoleWorkspace({ roleId }: { roleId: string }) {
   const [tab, setTab] = useState<"briefing" | "candidates">("candidates");
+  const [copiedLink, setCopiedLink] = useState(false);
   const [role, setRole] = useState<RoleDetail | null>(null);
   const [roleError, setRoleError] = useState<string | null>(null);
   const [candidates, setCandidates] = useState<CandidateWithFeedback[]>([]);
@@ -358,35 +359,39 @@ export default function RoleWorkspace({ roleId }: { roleId: string }) {
             )}
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => {
-            const url = `${window.location.origin}/apply/${roleId}`;
-            navigator.clipboard.writeText(url);
-            setCopiedLink(true);
-            setTimeout(() => setCopiedLink(false), 2000);
-          }}
-          className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 shadow-sm"
-        >
-          {copiedLink ? "✓ Link copied!" : "Get Application Link"}
-        </button>
-
-       
-        <div className="flex rounded-lg border border-slate-200 bg-white p-1 shadow-sm">
+        <div className="flex items-center gap-3">
           <button
             type="button"
-            onClick={() => setTab("candidates")}
-            className={`rounded-md px-4 py-2 text-sm font-medium ${tab === "candidates" ? "bg-blue-600 text-white" : "text-slate-700 hover:bg-slate-50"}`}
+            onClick={async () => {
+              const link = window.location.origin + "/apply/" + roleId;
+              await navigator.clipboard.writeText(link);
+              setCopiedLink(true);
+              setTimeout(() => setCopiedLink(false), 2000);
+            }}
+            className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
           >
-            Candidates
+            {copiedLink ? (
+              <span className="text-emerald-600">✓ Link copied!</span>
+            ) : (
+              "Get Application Link"
+            )}
           </button>
-          <button
-            type="button"
-            onClick={() => setTab("briefing")}
-            className={`rounded-md px-4 py-2 text-sm font-medium ${tab === "briefing" ? "bg-blue-600 text-white" : "text-slate-700 hover:bg-slate-50"}`}
-          >
-            Briefing
-          </button>
+          <div className="flex rounded-lg border border-slate-200 bg-white p-1 shadow-sm">
+            <button
+              type="button"
+              onClick={() => setTab("candidates")}
+              className={`rounded-md px-4 py-2 text-sm font-medium ${tab === "candidates" ? "bg-blue-600 text-white" : "text-slate-700 hover:bg-slate-50"}`}
+            >
+              Candidates
+            </button>
+            <button
+              type="button"
+              onClick={() => setTab("briefing")}
+              className={`rounded-md px-4 py-2 text-sm font-medium ${tab === "briefing" ? "bg-blue-600 text-white" : "text-slate-700 hover:bg-slate-50"}`}
+            >
+              Briefing
+            </button>
+          </div>
         </div>
       </div>
 
