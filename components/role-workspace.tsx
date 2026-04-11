@@ -48,6 +48,7 @@ export default function RoleWorkspace({ roleId }: { roleId: string }) {
     skippedNonPdf: string[];
   } | null>(null);
   const [expandedCandidateId, setExpandedCandidateId] = useState<string | null>(null);
+  const [copiedLink, setCopiedLink] = useState(false);
   const [duplicate, setDuplicate] = useState<DuplicateState | null>(null);
 
   const loadRole = useCallback(async () => {
@@ -357,6 +358,20 @@ export default function RoleWorkspace({ roleId }: { roleId: string }) {
             )}
           </p>
         </div>
+        <button
+          type="button"
+          onClick={() => {
+            const url = `${window.location.origin}/apply/${roleId}`;
+            navigator.clipboard.writeText(url);
+            setCopiedLink(true);
+            setTimeout(() => setCopiedLink(false), 2000);
+          }}
+          className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 shadow-sm"
+        >
+          {copiedLink ? "✓ Link copied!" : "Get Application Link"}
+        </button>
+
+       
         <div className="flex rounded-lg border border-slate-200 bg-white p-1 shadow-sm">
           <button
             type="button"

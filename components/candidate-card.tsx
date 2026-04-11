@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { normalizeScoreBreakdown } from "@/lib/score-breakdown";
 import type {
   FeedbackType,
@@ -53,6 +53,9 @@ export default function CandidateCard({
   const [rejectOpen, setRejectOpen] = useState(false);
   const [rejectReason, setRejectReason] = useState<RejectReason | "">("");
   const [localCandidate, setLocalCandidate] = useState(candidate);
+  useEffect(() => {
+    setLocalCandidate(candidate);
+  }, [candidate]);
 
   const a = localCandidate.analysis;
   const roleFitBuilding = feedbackSignalCount < 20;
