@@ -1,14 +1,35 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { normalizeScoreBreakdown } from "@/lib/score-breakdown";
-import type {
-  FeedbackType,
-  RejectReason,
-  ResumeAnalysisPayload,
-} from "@/lib/types";
+import type { FeedbackType, RejectReason, ResumeAnalysisPayload } from "@/lib/types";
 import ScoreWithTooltip from "./score-with-tooltip";
 
+// ── Speech Recognition minimal types ─────────────────────────────────────────
+interface SRResult {
+  isFinal: boolean;
+  0: { transcript: string };
+}
+interface SRResultList {
+  length: number;
+  [i: number]: SRResult;
+}
+interface SREvent {
+  resultIndex: number;
+  results: SRResultList;
+}
+interface SRInstance {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  onresult: ((e: SREvent) => void) | null;
+  onend: (() => void) | null;
+  onerror: ((e: { error: string }) => void) | null;
+  start(): void;
+  stop(): void;
+}
+
+// ── Constants ─────────────────────────────────────────────────────────────────
 const REJECT_REASONS: RejectReason[] = [
   "Overqualified",
   "Underqualified",
@@ -17,6 +38,18 @@ const REJECT_REASONS: RejectReason[] = [
   "Missing skills",
   "Other",
 ];
+
+// ── Exported types ────────────────────────────────────────────────────────────
+export type CandidateAnnotation = {
+  id: string;
+  transcript: string;
+  sentiment: string;
+  observations: string[];
+  concerns: string[];
+  strengths: string[];
+  suggested_feedback: string | null;
+  created_at: string;
+};
 
 export type CandidateWithFeedback = {
   id: string;
@@ -34,8 +67,12 @@ export type CandidateWithFeedback = {
     reject_reason: string | null;
     created_at: string;
   } | null;
+  annotations: CandidateAnnotation[];
 };
 
+type AnnotationMode = "idle" | "recording" | "review" | "saving";
+
+// ── Component ─────────────────────────────────────────────────────────────────
 export default function CandidateCard({
   candidate,
   feedbackSignalCount,
@@ -45,6 +82,7 @@ export default function CandidateCard({
   feedbackSignalCount: number;
   onAfterFeedback: () => void;
 }) {
+  // existing state
   const [busy, setBusy] = useState(false);
   const [reanalysing, setReanalysing] = useState(false);
   const [reanalyseError, setReanalyseError] = useState<string | null>(null);
@@ -57,6 +95,59 @@ export default function CandidateCard({
     setLocalCandidate(candidate);
   }, [candidate]);
 
+  // nudge state
+  const [showNudge, setShowNudge] = useState(false);
+  const feedbackGivenRef = useRef(false);
+
+  // Start 15s nudge timer on mount — only if no prior feedback exists
+  useEffect(() => {
+    if (candidate.latestFeedback !== null) return;
+    const timer = setTimeout(() => {
+      if (!feedbackGivenRef.current) setShowNudge(true);
+    }, 15_000);
+    return () => clearTimeout(timer);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // annotation state
+  const [annotationMode, setAnnotationMode] = useState<AnnotationMode>("idle");
+  const [finalTranscript, setFinalTranscript] = useState("");
+  const [interimTranscript, setInterimTranscript] = useState("");
+  const [editedTranscript, setEditedTranscript] = useState("");
+  const [annotationError, setAnnotationError] = useState<string | null>(null);
+  const [annotations, setAnnotations] = useState<CandidateAnnotation[]>(
+    candidate.annotations ?? []
+  );
+  // Track which annotation entries are expanded; newest is open by default
+  const [expandedAnnotationIds, setExpandedAnnotationIds] = useState<Set<string>>(
+    () => new Set(candidate.annotations?.[0] ? [candidate.annotations[0].id] : [])
+  );
+
+  const recognitionRef = useRef<SRInstance | null>(null);
+  const finalTranscriptRef = useRef("");
+  // modeRef lets the keydown handler read current mode without stale closure
+  const modeRef = useRef<AnnotationMode>("idle");
+  modeRef.current = annotationMode;
+
+  // Spacebar shortcut — card is only mounted when expanded, so this is safe
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.code !== "Space") return;
+      const t = e.target as HTMLElement;
+      if (
+        t.tagName === "INPUT" ||
+        t.tagName === "TEXTAREA" ||
+        t.tagName === "SELECT" ||
+        t.isContentEditable
+      )
+        return;
+      e.preventDefault();
+      if (modeRef.current === "recording") stopRecording();
+      else if (modeRef.current === "idle") startRecording();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   const a = localCandidate.analysis;
   const roleFitBuilding = feedbackSignalCount < 20;
   const jdBreakdown = normalizeScoreBreakdown(
@@ -68,22 +159,113 @@ export default function CandidateCard({
     localCandidate.role_fit_rationale
   );
 
+  // ── Speech recording ──────────────────────────────────────────────────────
+  function startRecording() {
+    const win = window as unknown as {
+      SpeechRecognition?: new () => SRInstance;
+      webkitSpeechRecognition?: new () => SRInstance;
+    };
+    const Ctor = win.SpeechRecognition ?? win.webkitSpeechRecognition;
+    if (!Ctor) {
+      setAnnotationError(
+        "Speech recognition is not supported in this browser. Try Chrome."
+      );
+      return;
+    }
+
+    finalTranscriptRef.current = "";
+    setFinalTranscript("");
+    setInterimTranscript("");
+    setAnnotationError(null);
+
+    const rec = new Ctor();
+    rec.continuous = true;
+    rec.interimResults = true;
+    rec.lang = "en-US";
+
+    rec.onresult = (e: SREvent) => {
+      let interim = "";
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const r = e.results[i];
+        if (r.isFinal) {
+          finalTranscriptRef.current += r[0].transcript + " ";
+        } else {
+          interim += r[0].transcript;
+        }
+      }
+      setFinalTranscript(finalTranscriptRef.current);
+      setInterimTranscript(interim);
+    };
+
+    rec.onerror = (e: { error: string }) => {
+      setAnnotationError(`Microphone error: ${e.error}`);
+      setAnnotationMode("idle");
+    };
+
+    rec.onend = () => {
+      setInterimTranscript("");
+      const t = finalTranscriptRef.current.trim();
+      if (t) {
+        setEditedTranscript(t);
+        setAnnotationMode("review");
+      } else {
+        setAnnotationMode("idle");
+      }
+    };
+
+    rec.start();
+    recognitionRef.current = rec;
+    setAnnotationMode("recording");
+  }
+
+  function stopRecording() {
+    recognitionRef.current?.stop();
+    recognitionRef.current = null;
+    // onend handler transitions state to "review"
+  }
+
+  // ── Save annotation ───────────────────────────────────────────────────────
+  async function saveAnnotation() {
+    const text = editedTranscript.trim();
+    if (!text) return;
+    setAnnotationMode("saving");
+    setAnnotationError(null);
+    try {
+      const res = await fetch(`/api/candidates/${localCandidate.id}/annotate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ transcript: text }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to save annotation.");
+      const saved = data.annotation as CandidateAnnotation;
+      setAnnotations((prev) => [saved, ...prev]);
+      setExpandedAnnotationIds((prev) => new Set([saved.id, ...prev]));
+      setAnnotationMode("idle");
+      setEditedTranscript("");
+      setFinalTranscript("");
+    } catch (e) {
+      setAnnotationError(
+        e instanceof Error ? e.message : "Failed to save annotation."
+      );
+      setAnnotationMode("review");
+    }
+  }
+
+  // ── Existing feedback / reanalyse ─────────────────────────────────────────
   async function handleReanalyse() {
     setReanalyseError(null);
     setReanalyseSuccess(false);
     setReanalysing(true);
     try {
-      const res = await fetch(
-        `/api/roles/${localCandidate.role_id}/candidates`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            resumeText: localCandidate.resume_text ?? a.rawText ?? "",
-            reanalyseCandidateId: localCandidate.id,
-          }),
-        }
-      );
+      const res = await fetch(`/api/roles/${localCandidate.role_id}/candidates`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          resumeText: localCandidate.resume_text ?? a.rawText ?? "",
+          reanalyseCandidateId: localCandidate.id,
+        }),
+      });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Re-analysis failed.");
       setLocalCandidate((prev) => ({ ...prev, ...data.candidate }));
@@ -98,16 +280,11 @@ export default function CandidateCard({
     }
   }
 
-  async function submitFeedback(
-    feedbackType: FeedbackType,
-    reason?: RejectReason
-  ) {
+  async function submitFeedback(feedbackType: FeedbackType, reason?: RejectReason) {
     setError(null);
-    if (feedbackType === "reject") {
-      if (!reason) {
-        setError("Choose a reject reason.");
-        return;
-      }
+    if (feedbackType === "reject" && !reason) {
+      setError("Choose a reject reason.");
+      return;
     }
     setBusy(true);
     try {
@@ -121,6 +298,8 @@ export default function CandidateCard({
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Feedback failed.");
+      feedbackGivenRef.current = true;
+      setShowNudge(false);
       setRejectOpen(false);
       setRejectReason("");
       onAfterFeedback();
@@ -131,8 +310,10 @@ export default function CandidateCard({
     }
   }
 
+  // ── Render ────────────────────────────────────────────────────────────────
   return (
     <article className="rounded-xl border border-slate-200 bg-white p-5 shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
+      {/* Header */}
       <div className="flex flex-col gap-4 border-b border-slate-100 pb-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h3 className="text-lg font-semibold text-slate-950">
@@ -200,6 +381,7 @@ export default function CandidateCard({
         </div>
       )}
 
+      {/* Rationale */}
       <div className="mt-4 grid gap-3 sm:grid-cols-2">
         <div>
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -219,6 +401,7 @@ export default function CandidateCard({
         </div>
       </div>
 
+      {/* Signals & gaps */}
       <div className="mt-4 grid gap-4 sm:grid-cols-2">
         <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
           <p className="text-xs font-semibold text-blue-800">Key signals</p>
@@ -269,6 +452,7 @@ export default function CandidateCard({
         </div>
       </div>
 
+      {/* Stats */}
       <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-3">
         <div>
           <dt className="text-xs text-slate-500">Experience</dt>
@@ -295,6 +479,7 @@ export default function CandidateCard({
         </div>
       </dl>
 
+      {/* Companies */}
       <div className="mt-4">
         <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
           Companies (estimated size / stage)
@@ -315,6 +500,7 @@ export default function CandidateCard({
         </ul>
       </div>
 
+      {/* Metrics */}
       {(a.keyMetricsRelevantToRole ?? []).length > 0 ? (
         <div className="mt-4">
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -322,10 +508,7 @@ export default function CandidateCard({
           </p>
           <ul className="mt-2 space-y-1 text-sm text-slate-800">
             {(a.keyMetricsRelevantToRole ?? []).map((m, i) => (
-              <li
-                key={`met-${i}`}
-                className="rounded-md bg-slate-50 px-3 py-1.5"
-              >
+              <li key={`met-${i}`} className="rounded-md bg-slate-50 px-3 py-1.5">
                 {m}
               </li>
             ))}
@@ -333,6 +516,7 @@ export default function CandidateCard({
         </div>
       ) : null}
 
+      {/* Last feedback */}
       {localCandidate.latestFeedback ? (
         <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
           <span className="font-medium">Last feedback: </span>
@@ -347,6 +531,24 @@ export default function CandidateCard({
 
       {error ? <p className="mt-3 text-sm text-red-600">{error}</p> : null}
 
+      {/* Feedback nudge */}
+      {showNudge ? (
+        <div className="mt-4 flex items-center justify-between gap-3 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 animate-pulse">
+          <p className="text-sm text-blue-800">
+            You have been reviewing this candidate for a while. Give a quick signal to help the system learn 👇
+          </p>
+          <button
+            type="button"
+            onClick={() => setShowNudge(false)}
+            aria-label="Dismiss"
+            className="shrink-0 text-blue-400 hover:text-blue-600"
+          >
+            ✕
+          </button>
+        </div>
+      ) : null}
+
+      {/* Feedback + voice note row */}
       <div className="mt-4 flex flex-col gap-2 border-t border-slate-100 pt-4 sm:flex-row sm:flex-wrap sm:items-center">
         <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
           Your feedback
@@ -418,7 +620,245 @@ export default function CandidateCard({
             </button>
           </div>
         )}
+
+        {/* Divider */}
+        <div className="hidden h-5 w-px bg-slate-200 sm:block" />
+
+        {/* Mic button — shown only in idle mode */}
+        {annotationMode === "idle" ? (
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={startRecording}
+              title="Start voice annotation"
+              className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+            >
+              <MicIcon />
+              Voice note
+            </button>
+            <span className="text-xs text-slate-400">Press Space to record</span>
+          </div>
+        ) : null}
       </div>
+
+      {/* Recording UI */}
+      {annotationMode === "recording" ? (
+        <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4">
+          <div className="flex items-center gap-3">
+            <span className="relative flex h-3 w-3 shrink-0">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-400 opacity-75" />
+              <span className="relative inline-flex h-3 w-3 rounded-full bg-red-500" />
+            </span>
+            <span className="text-sm font-medium text-red-800">Listening…</span>
+            <button
+              type="button"
+              onClick={stopRecording}
+              className="ml-auto rounded-lg border border-red-300 bg-white px-3 py-1 text-xs font-medium text-red-700 hover:bg-red-50"
+            >
+              Stop (Space)
+            </button>
+          </div>
+          <div className="mt-3 min-h-[2rem] text-sm text-slate-800">
+            {finalTranscript || interimTranscript ? (
+              <p>
+                <span>{finalTranscript}</span>
+                <span className="text-slate-400">{interimTranscript}</span>
+              </p>
+            ) : (
+              <p className="italic text-red-500/70 text-xs">Start speaking…</p>
+            )}
+          </div>
+        </div>
+      ) : null}
+
+      {/* Review / edit transcript */}
+      {annotationMode === "review" || annotationMode === "saving" ? (
+        <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+            Review transcript
+          </p>
+          <textarea
+            value={editedTranscript}
+            onChange={(e) => setEditedTranscript(e.target.value)}
+            rows={4}
+            disabled={annotationMode === "saving"}
+            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 disabled:opacity-60"
+          />
+          {annotationError ? (
+            <p className="mt-2 text-xs text-red-600">{annotationError}</p>
+          ) : null}
+          <div className="mt-3 flex items-center gap-2">
+            <button
+              type="button"
+              onClick={saveAnnotation}
+              disabled={annotationMode === "saving" || !editedTranscript.trim()}
+              className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-50"
+            >
+              {annotationMode === "saving" ? "Saving…" : "Save annotation"}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setAnnotationMode("idle");
+                setEditedTranscript("");
+                setFinalTranscript("");
+              }}
+              disabled={annotationMode === "saving"}
+              className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+            >
+              Discard
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {annotationError && annotationMode === "idle" ? (
+        <p className="mt-2 text-xs text-red-600">{annotationError}</p>
+      ) : null}
+
+      {/* Annotation history */}
+      {annotations.length > 0 ? (
+        <div className="mt-4">
+          <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-violet-800">
+            Annotation history{annotations.length > 1 ? ` (${annotations.length})` : ""}
+          </h4>
+          <ul className="space-y-2">
+            {annotations.map((ann) => {
+              const isOpen = expandedAnnotationIds.has(ann.id);
+              return (
+                <li key={ann.id} className="rounded-xl border border-violet-200 bg-violet-50 p-4">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-xs text-slate-500">
+                        {new Date(ann.created_at).toLocaleString("en-IN", {
+                          dateStyle: "medium",
+                          timeStyle: "short",
+                        })}
+                      </span>
+                      <SentimentBadge sentiment={ann.sentiment} />
+                      {ann.suggested_feedback ? (
+                        <span
+                          className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+                            ann.suggested_feedback === "shortlist"
+                              ? "bg-emerald-100 text-emerald-800"
+                              : ann.suggested_feedback === "reject"
+                              ? "bg-red-100 text-red-700"
+                              : "bg-amber-100 text-amber-800"
+                          }`}
+                        >
+                          Suggest: {ann.suggested_feedback}
+                        </span>
+                      ) : null}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setExpandedAnnotationIds((prev) => {
+                          const next = new Set(prev);
+                          next.has(ann.id) ? next.delete(ann.id) : next.add(ann.id);
+                          return next;
+                        })
+                      }
+                      className="shrink-0 text-xs text-violet-600 underline hover:text-violet-800"
+                    >
+                      {isOpen ? "Collapse" : "Expand"}
+                    </button>
+                  </div>
+
+                  {isOpen ? (
+                    <div className="mt-3 space-y-3">
+                      <div>
+                        <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-violet-700">
+                          Transcript
+                        </p>
+                        <p className="text-sm italic text-slate-800">
+                          &ldquo;{ann.transcript}&rdquo;
+                        </p>
+                      </div>
+                      {ann.strengths.length > 0 ? (
+                        <div>
+                          <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-700">
+                            Strengths
+                          </p>
+                          <ul className="space-y-1">
+                            {ann.strengths.map((s, i) => (
+                              <li key={i} className="flex gap-1.5 text-xs text-slate-800">
+                                <span className="shrink-0 text-emerald-500">✓</span>
+                                {s}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      ) : null}
+                      {ann.concerns.length > 0 ? (
+                        <div>
+                          <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-red-700">
+                            Concerns
+                          </p>
+                          <ul className="space-y-1">
+                            {ann.concerns.map((c, i) => (
+                              <li key={i} className="flex gap-1.5 text-xs text-slate-800">
+                                <span className="shrink-0 text-red-400">✗</span>
+                                {c}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      ) : null}
+                      {ann.observations.length > 0 ? (
+                        <div>
+                          <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-600">
+                            Observations
+                          </p>
+                          <ul className="space-y-0.5">
+                            {ann.observations.map((o, i) => (
+                              <li key={i} className="text-xs text-slate-700">
+                                · {o}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      ) : null}
     </article>
+  );
+}
+
+// ── Sub-components ────────────────────────────────────────────────────────────
+function MicIcon() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 20 20"
+      fill="currentColor"
+      className="h-4 w-4"
+      aria-hidden="true"
+    >
+      <path d="M7 4a3 3 0 016 0v6a3 3 0 11-6 0V4z" />
+      <path d="M5.5 9.643a.75.75 0 00-1.5 0V10c0 3.06 2.29 5.585 5.25 5.954V17.5h-1.5a.75.75 0 000 1.5h4.5a.75.75 0 000-1.5H10.5v-1.546A6.001 6.001 0 0016 10v-.357a.75.75 0 00-1.5 0V10a4.5 4.5 0 01-9 0v-.357z" />
+    </svg>
+  );
+}
+
+function SentimentBadge({ sentiment }: { sentiment: string }) {
+  const cls =
+    sentiment === "positive"
+      ? "bg-emerald-100 text-emerald-800"
+      : sentiment === "negative"
+      ? "bg-red-100 text-red-700"
+      : "bg-slate-100 text-slate-700";
+  return (
+    <span
+      className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${cls}`}
+    >
+      {sentiment}
+    </span>
   );
 }

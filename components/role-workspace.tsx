@@ -704,6 +704,12 @@ export default function RoleWorkspace({ roleId }: { roleId: string }) {
                       const isChecked = compareIds.includes(c.id);
                       const jdBd = normalizeScoreBreakdown(c.analysis.jdFitBreakdown ?? null, c.jd_fit_rationale);
                       const roleBd = normalizeScoreBreakdown(c.analysis.roleFitBreakdown ?? null, c.role_fit_rationale);
+                      const fbType = c.latestFeedback?.feedback_type;
+                      const rowBorderColor =
+                        fbType === "shortlist" ? "#10b981"
+                        : fbType === "reject" ? "#ef4444"
+                        : fbType === "hold" ? "#f59e0b"
+                        : "transparent";
                       return (
                         <Fragment key={c.id}>
                           <tr
@@ -717,7 +723,8 @@ export default function RoleWorkspace({ roleId }: { roleId: string }) {
                                 setExpandedCandidateId((prev) => prev === c.id ? null : c.id);
                               }
                             }}
-                            className={`cursor-pointer transition-colors duration-200 hover:bg-slate-50/80 ${isOpen ? "bg-blue-50/60" : ""}`}
+                            style={{ borderLeft: `4px solid ${rowBorderColor}` }}
+                            className={`cursor-pointer transition-colors duration-200 hover:bg-slate-50/80 ${isOpen ? "bg-blue-50/60" : ""} ${fbType === "reject" ? "opacity-75" : ""}`}
                           >
                             <td className="px-3 py-3 align-middle" onClick={(e) => e.stopPropagation()}>
                               <input
@@ -743,9 +750,8 @@ export default function RoleWorkspace({ roleId }: { roleId: string }) {
                                 ) : null}
                               </div>
                             </td>
-                            <td className="px-4 py-3 capitalize text-slate-700">
-                              {c.latestFeedback?.feedback_type ?? "—"}
-                              {c.latestFeedback?.reject_reason ? ` (${c.latestFeedback.reject_reason})` : ""}
+                            <td className="px-4 py-3">
+                              <RowFeedbackBadge feedback={c.latestFeedback} />
                             </td>
                             <td className="max-w-xs px-4 py-3 text-slate-600">{sig.join(" · ") || "—"}</td>
                             <td className="px-2 py-3 align-middle text-slate-400">
@@ -1180,6 +1186,42 @@ function ComparisonModal({
         </div>
       </div>
     </div>
+  );
+}
+
+function RowFeedbackBadge({ feedback }: { feedback: CandidateWithFeedback["latestFeedback"] }) {
+  if (!feedback) {
+    return (
+      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500">
+        No signal
+      </span>
+    );
+  }
+  if (feedback.feedback_type === "shortlist") {
+    return (
+      <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-800">
+        Shortlisted
+      </span>
+    );
+  }
+  if (feedback.feedback_type === "reject") {
+    return (
+      <span className="rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-semibold text-red-700">
+        Rejected{feedback.reject_reason ? ` (${feedback.reject_reason})` : ""}
+      </span>
+    );
+  }
+  if (feedback.feedback_type === "hold") {
+    return (
+      <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-800">
+        On Hold
+      </span>
+    );
+  }
+  return (
+    <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500">
+      {feedback.feedback_type}
+    </span>
   );
 }
 
