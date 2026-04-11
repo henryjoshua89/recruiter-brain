@@ -14,6 +14,33 @@ type ScoringCalibration = {
   updatedAt: string;
 } | null;
 
+type RoleAnnotation = {
+  id: string;
+  candidateId: string;
+  candidateName: string;
+  transcript: string;
+  sentiment: string;
+  observations: string[];
+  concerns: string[];
+  strengths: string[];
+  suggestedFeedback: string | null;
+  createdAt: string;
+};
+
+type SignalPrevalence = {
+  label: string;
+  candidateCount: number;
+  percentage: number;
+};
+
+type AnnotationInsightsData = {
+  totalAnnotations: number;
+  annotatedCandidateCount: number;
+  sentiments: { positive: number; neutral: number; negative: number };
+  topStrengths: SignalPrevalence[];
+  topConcerns: SignalPrevalence[];
+};
+
 type RoleDetail = {
   id: string;
   jobDescription: string;
@@ -26,6 +53,8 @@ type RoleDetail = {
   } | null;
   feedbackSignalCount: number;
   scoringCalibration: ScoringCalibration;
+  annotations: RoleAnnotation[];
+  annotationInsights: AnnotationInsightsData;
 };
 
 type DuplicateState = {
@@ -77,6 +106,14 @@ export default function RoleWorkspace({ roleId }: { roleId: string }) {
       company: data.role.company,
       feedbackSignalCount: data.role.feedbackSignalCount ?? 0,
       scoringCalibration: (data.role.scoringCalibration as ScoringCalibration) ?? null,
+      annotations: (data.role.annotations as RoleAnnotation[]) ?? [],
+      annotationInsights: (data.role.annotationInsights as AnnotationInsightsData) ?? {
+        totalAnnotations: 0,
+        annotatedCandidateCount: 0,
+        sentiments: { positive: 0, neutral: 0, negative: 0 },
+        topStrengths: [],
+        topConcerns: [],
+      },
     });
     setFeedbackSignalCount(data.role.feedbackSignalCount ?? 0);
   }, [roleId]);
@@ -792,10 +829,184 @@ export default function RoleWorkspace({ roleId }: { roleId: string }) {
                 </p>
               </div>
             )}
+
+            {/* Annotation Insights */}
+            <div className="mt-6 border-t border-slate-100 pt-6">
+              <h3 className="text-sm font-semibold text-slate-950">Annotation insights</h3>
+              <p className="mt-0.5 text-xs text-slate-500">From voice notes recorded on candidate cards.</p>
+              <AnnotationInsights annotations={role.annotations} insights={role.annotationInsights} />
+            </div>
           </section>
         </div>
       )}
     </main>
+  );
+}
+
+function AnnotationInsights({
+  annotations,
+  insights,
+}: {
+  annotations: RoleAnnotation[];
+  insights: AnnotationInsightsData;
+}) {
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+
+  if (insights.totalAnnotations === 0) {
+    return (
+      <div className="mt-4 rounded-xl border border-slate-100 bg-slate-50 px-5 py-6 text-center">
+        <p className="text-sm text-slate-500">
+          No voice annotations yet. Press{" "}
+          <kbd className="rounded border border-slate-300 bg-white px-1.5 py-0.5 text-xs font-medium text-slate-700">
+            Space
+          </kbd>{" "}
+          on any candidate card to record your first annotation.
+        </p>
+      </div>
+    );
+  }
+
+  const { sentiments, topStrengths, topConcerns, totalAnnotations, annotatedCandidateCount } = insights;
+  const recent = annotations.slice(0, 3);
+
+  function toggleExpand(id: string) {
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
+
+  return (
+    <div className="mt-4 space-y-4">
+      {/* Summary row */}
+      <div className="flex flex-wrap items-center gap-3">
+        <span className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm font-medium text-slate-700">
+          {totalAnnotations} annotation{totalAnnotations !== 1 ? "s" : ""}
+          {annotatedCandidateCount > 0 && (
+            <span className="ml-1 text-slate-400">
+              across {annotatedCandidateCount} candidate{annotatedCandidateCount !== 1 ? "s" : ""}
+            </span>
+          )}
+        </span>
+        {sentiments.positive > 0 && (
+          <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-800">
+            {sentiments.positive} positive
+          </span>
+        )}
+        {sentiments.neutral > 0 && (
+          <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
+            {sentiments.neutral} neutral
+          </span>
+        )}
+        {sentiments.negative > 0 && (
+          <span className="rounded-full bg-red-100 px-3 py-1 text-xs font-semibold text-red-700">
+            {sentiments.negative} negative
+          </span>
+        )}
+      </div>
+
+      {/* Strengths + Concerns with prevalence */}
+      <div className="grid gap-3 sm:grid-cols-2">
+        {topStrengths.length > 0 && (
+          <div className="rounded-xl border border-emerald-100 bg-emerald-50 p-4">
+            <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-emerald-800">
+              Common strengths
+            </h4>
+            <ul className="space-y-1.5">
+              {topStrengths.map((signal, i) => (
+                <li key={i} className="relative overflow-hidden rounded-lg border border-emerald-100 bg-white">
+                  <div
+                    className="absolute inset-y-0 left-0 rounded-lg bg-emerald-200"
+                    style={{ width: `${signal.percentage}%` }}
+                    aria-hidden="true"
+                  />
+                  <div className="relative flex items-center justify-between gap-2 px-3 py-2">
+                    <span className="flex min-w-0 items-center gap-1.5 text-sm text-slate-800">
+                      <span className="shrink-0 text-xs text-emerald-500">✓</span>
+                      <span className="truncate">{signal.label}</span>
+                    </span>
+                    <span className="shrink-0 rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-800">
+                      {signal.candidateCount} candidate{signal.candidateCount !== 1 ? "s" : ""} · {signal.percentage}%
+                    </span>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {topConcerns.length > 0 && (
+          <div className="rounded-xl border border-amber-100 bg-amber-50 p-4">
+            <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-amber-800">
+              Common concerns
+            </h4>
+            <ul className="space-y-1.5">
+              {topConcerns.map((signal, i) => (
+                <li key={i} className="relative overflow-hidden rounded-lg border border-amber-100 bg-white">
+                  <div
+                    className="absolute inset-y-0 left-0 rounded-lg bg-amber-200"
+                    style={{ width: `${signal.percentage}%` }}
+                    aria-hidden="true"
+                  />
+                  <div className="relative flex items-center justify-between gap-2 px-3 py-2">
+                    <span className="flex min-w-0 items-center gap-1.5 text-sm text-slate-800">
+                      <span className="shrink-0 text-xs text-amber-500">!</span>
+                      <span className="truncate">{signal.label}</span>
+                    </span>
+                    <span className="shrink-0 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800">
+                      {signal.candidateCount} candidate{signal.candidateCount !== 1 ? "s" : ""} · {signal.percentage}%
+                    </span>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+
+      {/* Recent transcripts */}
+      <div>
+        <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+          Recent annotations
+        </h4>
+        <ul className="space-y-2">
+          {recent.map((ann) => {
+            const isOpen = expandedIds.has(ann.id);
+            return (
+              <li key={ann.id} className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs font-medium text-slate-900">{ann.candidateName}</span>
+                    <span className="text-xs text-slate-400">
+                      {new Date(ann.createdAt).toLocaleDateString(undefined, { dateStyle: "medium" })}
+                    </span>
+                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+                      ann.sentiment === "positive"
+                        ? "bg-emerald-100 text-emerald-800"
+                        : ann.sentiment === "negative"
+                        ? "bg-red-100 text-red-700"
+                        : "bg-slate-100 text-slate-600"
+                    }`}>
+                      {ann.sentiment}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => toggleExpand(ann.id)}
+                    className="shrink-0 text-xs text-slate-500 underline hover:text-slate-700"
+                  >
+                    {isOpen ? "Collapse" : "Expand"}
+                  </button>
+                </div>
+                <p className={`mt-2 text-sm italic text-slate-700 ${isOpen ? "" : "line-clamp-2"}`}>
+                  &ldquo;{ann.transcript}&rdquo;
+                </p>
+              </li>
+            );
+          })}
+        </ul>
+      </div>
+    </div>
   );
 }
 
