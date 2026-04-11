@@ -7,6 +7,13 @@ import type { BriefingSections } from "@/lib/types";
 import CandidateCard, { type CandidateWithFeedback } from "./candidate-card";
 import ScoreWithTooltip from "./score-with-tooltip";
 
+type ScoringCalibration = {
+  patternSummary: string;
+  roleFitScoringGuidance: string;
+  feedbackCount: number;
+  updatedAt: string;
+} | null;
+
 type RoleDetail = {
   id: string;
   jobDescription: string;
@@ -18,6 +25,7 @@ type RoleDetail = {
     websiteUrl: string;
   } | null;
   feedbackSignalCount: number;
+  scoringCalibration: ScoringCalibration;
 };
 
 type DuplicateState = {
@@ -49,8 +57,13 @@ export default function RoleWorkspace({ roleId }: { roleId: string }) {
     skippedNonPdf: string[];
   } | null>(null);
   const [expandedCandidateId, setExpandedCandidateId] = useState<string | null>(null);
-  const [copiedLink, setCopiedLink] = useState(false);
   const [duplicate, setDuplicate] = useState<DuplicateState | null>(null);
+  const [compareIds, setCompareIds] = useState<string[]>([]);
+  const [compareMaxError, setCompareMaxError] = useState(false);
+  const [showComparison, setShowComparison] = useState(false);
+  const [comparisonRec, setComparisonRec] = useState<string | null>(null);
+  const [comparisonLoading, setComparisonLoading] = useState(false);
+  const [comparisonError, setComparisonError] = useState<string | null>(null);
 
   const loadRole = useCallback(async () => {
     const res = await fetch(`/api/roles/${roleId}`);
@@ -63,6 +76,7 @@ export default function RoleWorkspace({ roleId }: { roleId: string }) {
       briefing: data.role.briefing as BriefingSections,
       company: data.role.company,
       feedbackSignalCount: data.role.feedbackSignalCount ?? 0,
+      scoringCalibration: (data.role.scoringCalibration as ScoringCalibration) ?? null,
     });
     setFeedbackSignalCount(data.role.feedbackSignalCount ?? 0);
   }, [roleId]);
@@ -199,6 +213,39 @@ export default function RoleWorkspace({ roleId }: { roleId: string }) {
       }
     } finally {
       setUploadBusy(false);
+    }
+  }
+
+  function toggleCompare(id: string) {
+    setCompareMaxError(false);
+    setCompareIds((prev) => {
+      if (prev.includes(id)) return prev.filter((x) => x !== id);
+      if (prev.length >= 4) {
+        setCompareMaxError(true);
+        return prev;
+      }
+      return [...prev, id];
+    });
+  }
+
+  async function handleCompare() {
+    setComparisonRec(null);
+    setComparisonError(null);
+    setShowComparison(true);
+    setComparisonLoading(true);
+    try {
+      const res = await fetch(`/api/roles/${roleId}/compare`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ candidateIds: compareIds }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Comparison failed.");
+      setComparisonRec(data.recommendation);
+    } catch (e) {
+      setComparisonError(e instanceof Error ? e.message : "Comparison failed.");
+    } finally {
+      setComparisonLoading(false);
     }
   }
 
@@ -530,7 +577,37 @@ export default function RoleWorkspace({ roleId }: { roleId: string }) {
           </section>
 
           <section>
-            <h2 className="mb-3 text-lg font-semibold text-slate-950">All candidates</h2>
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <h2 className="text-lg font-semibold text-slate-950">All candidates</h2>
+              <div className="flex items-center gap-2">
+                {compareMaxError ? (
+                  <span className="text-xs text-amber-700 font-medium">
+                    Maximum 4 candidates can be compared at once.
+                  </span>
+                ) : null}
+                {compareIds.length >= 2 ? (
+                  <button
+                    type="button"
+                    onClick={handleCompare}
+                    className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 shadow-sm"
+                  >
+                    Compare ({compareIds.length})
+                  </button>
+                ) : null}
+                {compareIds.length === 1 ? (
+                  <span className="text-xs text-slate-500">Select 1 more to compare</span>
+                ) : null}
+                {compareIds.length > 0 ? (
+                  <button
+                    type="button"
+                    onClick={() => { setCompareIds([]); setCompareMaxError(false); }}
+                    className="text-xs text-slate-500 underline hover:text-slate-700"
+                  >
+                    Clear
+                  </button>
+                ) : null}
+              </div>
+            </div>
             {candidates.length === 0 ? (
               <p className="text-sm text-slate-600">No candidates yet. Submit a resume above.</p>
             ) : (
@@ -538,6 +615,7 @@ export default function RoleWorkspace({ roleId }: { roleId: string }) {
                 <table className="min-w-full text-left text-sm">
                   <thead className="border-b border-slate-200 bg-slate-50 text-xs uppercase text-slate-600">
                     <tr>
+                      <th className="w-10 px-3 py-3" aria-label="Compare" />
                       <th className="px-4 py-3">Candidate</th>
                       <th className="px-4 py-3">JD fit</th>
                       <th className="px-4 py-3">Role fit</th>
@@ -550,6 +628,7 @@ export default function RoleWorkspace({ roleId }: { roleId: string }) {
                     {candidates.map((c) => {
                       const sig = (c.analysis.keySignals ?? []).slice(0, 2);
                       const isOpen = expandedCandidateId === c.id;
+                      const isChecked = compareIds.includes(c.id);
                       const jdBd = normalizeScoreBreakdown(c.analysis.jdFitBreakdown ?? null, c.jd_fit_rationale);
                       const roleBd = normalizeScoreBreakdown(c.analysis.roleFitBreakdown ?? null, c.role_fit_rationale);
                       return (
@@ -567,6 +646,15 @@ export default function RoleWorkspace({ roleId }: { roleId: string }) {
                             }}
                             className={`cursor-pointer transition-colors duration-200 hover:bg-slate-50/80 ${isOpen ? "bg-blue-50/60" : ""}`}
                           >
+                            <td className="px-3 py-3 align-middle" onClick={(e) => e.stopPropagation()}>
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={() => toggleCompare(c.id)}
+                                aria-label={`Select ${c.analysis.fullName} for comparison`}
+                                className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                              />
+                            </td>
                             <td className="px-4 py-3">
                               <div className="font-medium text-slate-900">{c.analysis.fullName}</div>
                               <div className="text-xs text-slate-500">{c.analysis.currentTitle}</div>
@@ -592,7 +680,7 @@ export default function RoleWorkspace({ roleId }: { roleId: string }) {
                             </td>
                           </tr>
                           <tr className="!border-b-0 hover:bg-transparent">
-                            <td colSpan={6} className="border-0 p-0">
+                            <td colSpan={7} className="border-0 p-0">
                               <div
                                 className="grid transition-[grid-template-rows] duration-300 ease-in-out motion-reduce:transition-none"
                                 style={{ gridTemplateRows: isOpen ? "1fr" : "0fr" }}
@@ -622,9 +710,229 @@ export default function RoleWorkspace({ roleId }: { roleId: string }) {
               </div>
             )}
           </section>
+
+          {showComparison ? (
+            <ComparisonModal
+              candidates={candidates.filter((c) => compareIds.includes(c.id))}
+              recommendation={comparisonRec}
+              loading={comparisonLoading}
+              error={comparisonError}
+              onClose={() => setShowComparison(false)}
+            />
+          ) : null}
+
+          <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+            <h2 className="text-lg font-semibold text-slate-950">Learning loop</h2>
+            <p className="mt-1 text-sm text-slate-500">
+              Insights the system has derived from your feedback on this role.
+            </p>
+            {feedbackSignalCount < 5 ? (
+              <div className="mt-4 rounded-xl border border-slate-100 bg-slate-50 px-5 py-6 text-center">
+                <p className="text-sm text-slate-500">
+                  Give feedback on 5 or more candidates to activate the learning feed.
+                </p>
+                <p className="mt-1 text-xs text-slate-400">
+                  {feedbackSignalCount} of 5 signals collected
+                </p>
+              </div>
+            ) : role.scoringCalibration ? (
+              <div className="mt-4 space-y-4">
+                <div className="rounded-xl border border-slate-100 bg-slate-50 p-4">
+                  <h3 className="text-xs font-semibold uppercase tracking-wide text-blue-800">Pattern summary</h3>
+                  <p className="mt-2 whitespace-pre-wrap text-sm text-slate-800">{role.scoringCalibration.patternSummary}</p>
+                </div>
+                <div className="rounded-xl border border-slate-100 bg-slate-50 p-4">
+                  <h3 className="text-xs font-semibold uppercase tracking-wide text-blue-800">Role-fit scoring guidance</h3>
+                  <p className="mt-2 whitespace-pre-wrap text-sm text-slate-800">{role.scoringCalibration.roleFitScoringGuidance}</p>
+                </div>
+                <p className="text-xs text-slate-400">
+                  Based on {role.scoringCalibration.feedbackCount} feedback signal{role.scoringCalibration.feedbackCount === 1 ? "" : "s"} · last updated {new Date(role.scoringCalibration.updatedAt).toLocaleDateString(undefined, { dateStyle: "medium" })}
+                </p>
+              </div>
+            ) : (
+              <div className="mt-4 rounded-xl border border-slate-100 bg-slate-50 px-5 py-6 text-center">
+                <p className="text-sm text-slate-500">
+                  Calibration is computing — check back shortly.
+                </p>
+              </div>
+            )}
+          </section>
         </div>
       )}
     </main>
+  );
+}
+
+function ComparisonModal({
+  candidates,
+  recommendation,
+  loading,
+  error,
+  onClose,
+}: {
+  candidates: CandidateWithFeedback[];
+  recommendation: string | null;
+  loading: boolean;
+  error: string | null;
+  onClose: () => void;
+}) {
+  const trajectoryBadge = (t: string) => {
+    if (t === "ascending") return "bg-emerald-100 text-emerald-800";
+    if (t === "descending") return "bg-red-100 text-red-700";
+    return "bg-slate-100 text-slate-700";
+  };
+
+  const feedbackBadge = (fb: CandidateWithFeedback["latestFeedback"]) => {
+    if (!fb) return { label: "No feedback", cls: "bg-slate-100 text-slate-500" };
+    if (fb.feedback_type === "shortlist") return { label: "Shortlisted", cls: "bg-emerald-100 text-emerald-800" };
+    if (fb.feedback_type === "reject") return { label: `Rejected${fb.reject_reason ? ` (${fb.reject_reason})` : ""}`, cls: "bg-red-100 text-red-700" };
+    return { label: "Hold", cls: "bg-amber-100 text-amber-800" };
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 overflow-y-auto bg-black/50 px-4 py-10"
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div className="mx-auto w-full max-w-6xl rounded-2xl border border-slate-200 bg-white shadow-xl">
+        {/* Header */}
+        <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
+          <div>
+            <h2 className="text-lg font-semibold text-slate-950">
+              Comparing {candidates.length} candidate{candidates.length !== 1 ? "s" : ""}
+            </h2>
+            <p className="text-xs text-slate-500 mt-0.5">Side-by-side breakdown</p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50"
+          >
+            Close
+          </button>
+        </div>
+
+        {/* Candidate columns */}
+        <div className="overflow-x-auto p-6">
+          <div
+            className="grid gap-4"
+            style={{ gridTemplateColumns: `repeat(${candidates.length}, minmax(220px, 1fr))` }}
+          >
+            {candidates.map((c) => {
+              const a = c.analysis;
+              const signals = (a.keySignals ?? []).slice(0, 3);
+              const gaps = (a.missingForRole ?? []).slice(0, 2);
+              const fb = feedbackBadge(c.latestFeedback);
+              return (
+                <div
+                  key={c.id}
+                  className="flex flex-col gap-4 rounded-xl border border-slate-200 bg-slate-50 p-4"
+                >
+                  {/* Name + title */}
+                  <div>
+                    <div className="font-semibold text-slate-950">{a.fullName || "Unknown"}</div>
+                    <div className="text-xs text-slate-500 mt-0.5">{a.currentTitle}</div>
+                  </div>
+
+                  {/* Scores */}
+                  <div className="flex gap-2">
+                    <div className="flex-1 rounded-lg border border-blue-100 bg-blue-50 px-2 py-2 text-center">
+                      <div className="text-[10px] font-semibold uppercase tracking-wide text-blue-700">JD fit</div>
+                      <div className="text-xl font-bold text-blue-950">{c.jd_fit_score}</div>
+                    </div>
+                    <div className="flex-1 rounded-lg border border-emerald-100 bg-emerald-50 px-2 py-2 text-center">
+                      <div className="text-[10px] font-semibold uppercase tracking-wide text-emerald-700">Role fit</div>
+                      <div className="text-xl font-bold text-emerald-950">{c.role_fit_score}</div>
+                    </div>
+                  </div>
+
+                  {/* Experience */}
+                  <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+                    <div className="text-xs text-slate-500 mb-1">Experience</div>
+                    <div className="font-medium text-slate-900">
+                      {a.totalYearsExperience} yrs total · {a.relevantYearsForRole} yrs relevant
+                    </div>
+                    <div className="text-xs text-slate-600 mt-0.5">
+                      Avg tenure: {a.averageTenureYearsPerRole} yrs/role
+                    </div>
+                  </div>
+
+                  {/* Trajectory */}
+                  <div>
+                    <div className="text-xs text-slate-500 mb-1">Career trajectory</div>
+                    <span className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-medium capitalize ${trajectoryBadge(a.careerTrajectory)}`}>
+                      {a.careerTrajectory}
+                    </span>
+                  </div>
+
+                  {/* Key signals */}
+                  <div>
+                    <div className="text-xs font-semibold text-blue-800 mb-1.5">Top signals</div>
+                    {signals.length > 0 ? (
+                      <ul className="space-y-1">
+                        {signals.map((s, i) => (
+                          <li key={i} className="flex gap-1.5 text-xs text-slate-800">
+                            <span className="text-emerald-500 shrink-0">✓</span>
+                            <span>{s}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="text-xs text-slate-400">None recorded</p>
+                    )}
+                  </div>
+
+                  {/* Gaps */}
+                  <div>
+                    <div className="text-xs font-semibold text-amber-800 mb-1.5">Top gaps</div>
+                    {gaps.length > 0 ? (
+                      <ul className="space-y-1">
+                        {gaps.map((g, i) => (
+                          <li key={i} className="flex gap-1.5 text-xs text-slate-800">
+                            <span className="text-red-400 shrink-0">✗</span>
+                            <span>{g}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="text-xs text-slate-400">None flagged</p>
+                    )}
+                  </div>
+
+                  {/* Feedback */}
+                  <div>
+                    <div className="text-xs text-slate-500 mb-1">Feedback status</div>
+                    <span className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-medium ${fb.cls}`}>
+                      {fb.label}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Claude recommendation */}
+        <div className="border-t border-slate-200 px-6 py-5">
+          <div className="flex items-center gap-2 mb-3">
+            <h3 className="text-sm font-semibold text-slate-950">Claude&apos;s recommendation</h3>
+            <span className="rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-violet-700">
+              AI
+            </span>
+          </div>
+          {loading ? (
+            <div className="flex items-center gap-2 text-sm text-slate-500">
+              <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-slate-300 border-t-blue-600" />
+              Analysing candidates…
+            </div>
+          ) : error ? (
+            <p className="text-sm text-red-600">{error}</p>
+          ) : recommendation ? (
+            <p className="text-sm leading-relaxed text-slate-800">{recommendation}</p>
+          ) : null}
+        </div>
+      </div>
+    </div>
   );
 }
 
