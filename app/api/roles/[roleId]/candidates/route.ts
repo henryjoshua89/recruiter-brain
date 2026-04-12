@@ -22,6 +22,18 @@ type CandidateRow = {
   created_at: string;
 };
 
+type AnnotationRow = {
+  id: string;
+  candidate_id: string;
+  transcript: string;
+  sentiment: string | null;
+  observations: unknown;
+  concerns: unknown;
+  strengths: unknown;
+  suggested_feedback: string | null;
+  created_at: string;
+};
+
 function attachLatestFeedback(
   candidates: CandidateRow[],
   feedback: {
@@ -75,20 +87,48 @@ export async function GET(
     reject_reason: string | null;
     created_at: string;
   }[] = [];
+  let annotations: AnnotationRow[] = [];
 
   if (ids.length > 0) {
-    const { data: fb } = await supabase
-      .from("candidate_feedback")
-      .select("candidate_id, feedback_type, reject_reason, created_at")
-      .in("candidate_id", ids)
-      .order("created_at", { ascending: false });
-    feedback = fb ?? [];
+    const [fbResult, annResult] = await Promise.all([
+      supabase
+        .from("candidate_feedback")
+        .select("candidate_id, feedback_type, reject_reason, created_at")
+        .in("candidate_id", ids)
+        .order("created_at", { ascending: false }),
+      supabase
+        .from("candidate_annotations")
+        .select("id, candidate_id, transcript, sentiment, observations, concerns, strengths, suggested_feedback, created_at")
+        .in("candidate_id", ids)
+        .order("created_at", { ascending: false }),
+    ]);
+    feedback = fbResult.data ?? [];
+    annotations = (annResult.data ?? []) as AnnotationRow[];
+  }
+
+  const annotationsByCandidate = new Map<string, AnnotationRow[]>();
+  for (const ann of annotations) {
+    const list = annotationsByCandidate.get(ann.candidate_id) ?? [];
+    list.push(ann);
+    annotationsByCandidate.set(ann.candidate_id, list);
   }
 
   const withMeta = attachLatestFeedback(
     (candidates ?? []) as CandidateRow[],
     feedback
-  );
+  ).map((c) => ({
+    ...c,
+    annotations: (annotationsByCandidate.get(c.id) ?? []).map((ann) => ({
+      id: ann.id,
+      transcript: ann.transcript,
+      sentiment: ann.sentiment ?? "neutral",
+      observations: (ann.observations as string[]) ?? [],
+      concerns: (ann.concerns as string[]) ?? [],
+      strengths: (ann.strengths as string[]) ?? [],
+      suggested_feedback: ann.suggested_feedback,
+      created_at: ann.created_at,
+    })),
+  }));
 
   const { count: feedbackSignalCount } = await supabase
     .from("candidate_feedback")
@@ -184,7 +224,7 @@ export async function POST(
   const { data: role, error: roleError } = await supabase
     .from("roles")
     .select(
-      "id, job_description, internal_context, briefing, scoring_calibration"
+      "id, job_description, internal_context, briefing, scoring_calibration, annotation_patterns"
     )
     .eq("id", roleId)
     .single();
@@ -212,6 +252,7 @@ export async function POST(
     resumeText,
     calibration,
     feedbackSignalCount: signalCount,
+    annotationPatterns: (role.annotation_patterns as string | null) ?? null,
   });
 
   // ── Re-analyse existing candidate ──────────────────────────────────────────

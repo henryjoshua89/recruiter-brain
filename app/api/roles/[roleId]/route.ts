@@ -33,15 +33,27 @@ export async function GET(
     );
   }
 
-  const { count: feedbackCount } = await supabase
-    .from("candidate_feedback")
-    .select("*", { count: "exact", head: true })
-    .eq("role_id", roleId);
-
-  const { count: candidateCount } = await supabase
-    .from("candidates")
-    .select("*", { count: "exact", head: true })
-    .eq("role_id", roleId);
+  const [
+    { count: feedbackCount },
+    { count: candidateCount },
+    { data: annotationRows },
+  ] = await Promise.all([
+    supabase
+      .from("candidate_feedback")
+      .select("*", { count: "exact", head: true })
+      .eq("role_id", roleId),
+    supabase
+      .from("candidates")
+      .select("*", { count: "exact", head: true })
+      .eq("role_id", roleId),
+    supabase
+      .from("candidate_annotations")
+      .select(
+        "id, candidate_id, transcript, sentiment, observations, concerns, strengths, suggested_feedback, created_at, candidates(analysis)"
+      )
+      .eq("role_id", roleId)
+      .order("created_at", { ascending: false }),
+  ]);
 
   const rawCo = role.companies as unknown;
   const coRow = Array.isArray(rawCo) ? rawCo[0] : rawCo;
@@ -51,6 +63,80 @@ export async function GET(
     website_url: string;
     public_context: unknown;
   } | null;
+
+  const annotations = (annotationRows ?? []).map((ann) => {
+    const candidateData = ann.candidates as { analysis?: { fullName?: string } } | null;
+    const candidateName =
+      candidateData?.analysis?.fullName ?? "Unknown candidate";
+    return {
+      id: ann.id,
+      candidateId: ann.candidate_id,
+      candidateName,
+      transcript: ann.transcript,
+      sentiment: ann.sentiment ?? "neutral",
+      observations: (ann.observations as string[]) ?? [],
+      concerns: (ann.concerns as string[]) ?? [],
+      strengths: (ann.strengths as string[]) ?? [],
+      suggestedFeedback: ann.suggested_feedback,
+      createdAt: ann.created_at,
+    };
+  });
+
+  // ── Annotation insights ──────────────────────────────────────────────────
+  // Group all annotations by candidate so we can count per-candidate signal prevalence
+  type CandAnn = { strengths: string[]; concerns: string[] };
+  const annsByCandidate = new Map<string, CandAnn[]>();
+  const sentiments = { positive: 0, neutral: 0, negative: 0 };
+
+  for (const ann of annotations) {
+    const list = annsByCandidate.get(ann.candidateId) ?? [];
+    list.push({ strengths: ann.strengths, concerns: ann.concerns });
+    annsByCandidate.set(ann.candidateId, list);
+    const s = ann.sentiment as keyof typeof sentiments;
+    if (s in sentiments) sentiments[s]++;
+  }
+
+  const annotatedCandidateCount = annsByCandidate.size;
+
+  function computeSignalPrevalence(
+    field: "strengths" | "concerns",
+    max = 8
+  ): { label: string; candidateCount: number; percentage: number }[] {
+    // Track which candidates mention each signal (deduplicated per candidate)
+    const signalMap = new Map<string, { original: string; candidates: Set<string> }>();
+    for (const [candidateId, anns] of annsByCandidate) {
+      const seenKeys = new Set<string>();
+      for (const ann of anns) {
+        for (const item of ann[field]) {
+          const key = item.toLowerCase().trim();
+          if (!key || seenKeys.has(key)) continue;
+          seenKeys.add(key);
+          const entry = signalMap.get(key);
+          if (entry) entry.candidates.add(candidateId);
+          else signalMap.set(key, { original: item, candidates: new Set([candidateId]) });
+        }
+      }
+    }
+    return [...signalMap.values()]
+      .sort((a, b) => b.candidates.size - a.candidates.size)
+      .slice(0, max)
+      .map(({ original, candidates }) => ({
+        label: original,
+        candidateCount: candidates.size,
+        percentage:
+          annotatedCandidateCount > 0
+            ? Math.round((candidates.size / annotatedCandidateCount) * 100)
+            : 0,
+      }));
+  }
+
+  const annotationInsights = {
+    totalAnnotations: annotations.length,
+    annotatedCandidateCount,
+    sentiments,
+    topStrengths: computeSignalPrevalence("strengths"),
+    topConcerns: computeSignalPrevalence("concerns"),
+  };
 
   return NextResponse.json({
     role: {
@@ -73,6 +159,8 @@ export async function GET(
         : null,
       candidateCount: candidateCount ?? 0,
       feedbackSignalCount: feedbackCount ?? 0,
+      annotations,
+      annotationInsights,
     },
   });
 }

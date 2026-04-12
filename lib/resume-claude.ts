@@ -75,6 +75,7 @@ export function buildResumeAnalysisUserPrompt(args: {
   resumeText: string;
   calibration: RoleScoringCalibration | null;
   feedbackSignalCount: number;
+  annotationPatterns?: string | null;
 }): string {
   const calBlock =
     args.calibration && args.calibration.roleFitScoringGuidance
@@ -169,6 +170,8 @@ RESUME TEXT:
 ${args.resumeText}
 
 ${calBlock}
+
+${args.annotationPatterns ? `RECRUITER ANNOTATION PATTERNS FOR THIS ROLE SO FAR:\n${args.annotationPatterns}` : ""}
 `.trim();
 }
 
@@ -180,6 +183,7 @@ export async function runResumeAnalysis(args: {
   resumeText: string;
   calibration: RoleScoringCalibration | null;
   feedbackSignalCount: number;
+  annotationPatterns?: string | null;
 }): Promise<ResumeAnalysisPayload> {
   const client = new Anthropic({ apiKey: args.apiKey });
   const text = buildResumeAnalysisUserPrompt({
@@ -189,6 +193,7 @@ export async function runResumeAnalysis(args: {
     resumeText: args.resumeText,
     calibration: args.calibration,
     feedbackSignalCount: args.feedbackSignalCount,
+    annotationPatterns: args.annotationPatterns,
   });
 
   const message = await client.messages.create({

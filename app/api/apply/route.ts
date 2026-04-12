@@ -6,8 +6,8 @@ import { runResumeAnalysis } from "@/lib/resume-claude";
 
 export const runtime = "nodejs";
 
-const MAX_RESUME_CHARS = 55_000;
 const MAX_PDF_BYTES = 12 * 1024 * 1024;
+const MAX_RESUME_CHARS = 55_000;
 
 export async function POST(request: Request) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -18,69 +18,36 @@ export async function POST(request: Request) {
     );
   }
 
-  const contentType = request.headers.get("content-type") ?? "";
-  if (!contentType.includes("multipart/form-data")) {
-    return NextResponse.json(
-      { error: "Request must be multipart/form-data." },
-      { status: 400 }
-    );
-  }
-
   const form = await request.formData();
-
-  const roleId = (form.get("roleId") as string | null)?.trim() ?? "";
-  const fullName = (form.get("fullName") as string | null)?.trim() ?? "";
-  const email = (form.get("email") as string | null)?.trim() ?? "";
-  const phone = (form.get("phone") as string | null)?.trim() ?? "";
-  const linkedinUrl = (form.get("linkedinUrl") as string | null)?.trim() ?? "";
-  const coverNote = (form.get("coverNote") as string | null)?.trim() ?? "";
-  const portfolioUrl = (form.get("portfolioUrl") as string | null)?.trim() ?? "";
+  const roleId = form.get("roleId") as string;
+  const fullName = form.get("fullName") as string;
+  const email = form.get("email") as string;
+  const phone = (form.get("phone") as string) || null;
+  const linkedinUrl = (form.get("linkedinUrl") as string) || null;
+  const coverNote = (form.get("coverNote") as string) || null;
+  const portfolioUrl = (form.get("portfolioUrl") as string) || null;
   const file = form.get("file") as File | null;
-  const pastedText = (form.get("resumeText") as string | null)?.trim() ?? "";
 
-  if (!roleId) {
-    return NextResponse.json({ error: "Missing roleId." }, { status: 400 });
-  }
-  if (!fullName) {
-    return NextResponse.json({ error: "Full name is required." }, { status: 400 });
-  }
-  if (!email) {
-    return NextResponse.json({ error: "Email is required." }, { status: 400 });
-  }
-
-  // ── Extract resume text ───────────────────────────────────────────────────
-  let resumeText = "";
-  let resumeFilename: string | null = null;
-
-  if (file && file.size > 0) {
-    if (file.size > MAX_PDF_BYTES) {
-      return NextResponse.json(
-        { error: "PDF is too large (max 12 MB)." },
-        { status: 400 }
-      );
-    }
-    const name = file.name?.toLowerCase() ?? "";
-    if (!name.endsWith(".pdf")) {
-      return NextResponse.json(
-        { error: "Please upload a PDF file." },
-        { status: 400 }
-      );
-    }
-    const buf = Buffer.from(await file.arrayBuffer());
-    resumeText = await extractPdfText(buf);
-    resumeFilename = file.name || "resume.pdf";
-  } else if (pastedText) {
-    resumeText = pastedText;
-  } else {
+  if (!roleId || !fullName || !email || !file) {
     return NextResponse.json(
-      { error: "Please upload a PDF resume or paste your resume text." },
+      { error: "Missing required fields." },
       { status: 400 }
     );
   }
 
-  if (resumeText.length < 40) {
+  if (file.size > MAX_PDF_BYTES) {
     return NextResponse.json(
-      { error: "Resume text is too short. Please upload a valid PDF or paste more content." },
+      { error: "PDF is too large (max 12 MB)." },
+      { status: 400 }
+    );
+  }
+
+  const buf = Buffer.from(await file.arrayBuffer());
+  let resumeText = await extractPdfText(buf);
+
+  if (!resumeText || resumeText.length < 40) {
+    return NextResponse.json(
+      { error: "Could not extract text from PDF. Please try another file." },
       { status: 400 }
     );
   }
@@ -89,10 +56,11 @@ export async function POST(request: Request) {
     resumeText = resumeText.slice(0, MAX_RESUME_CHARS);
   }
 
-  // ── Fetch role ────────────────────────────────────────────────────────────
   const { data: role, error: roleError } = await supabase
     .from("roles")
-    .select("id, job_description, internal_context, briefing, scoring_calibration")
+    .select(
+      "id, job_description, internal_context, briefing, scoring_calibration"
+    )
     .eq("id", roleId)
     .single();
 
@@ -100,7 +68,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Role not found." }, { status: 404 });
   }
 
-  // ── Calibration ───────────────────────────────────────────────────────────
   const { count: feedbackSignalCount } = await supabase
     .from("candidate_feedback")
     .select("*", { count: "exact", head: true })
@@ -112,7 +79,6 @@ export async function POST(request: Request) {
       ? parseCalibrationFromRoleRow(role.scoring_calibration)
       : null;
 
-  // ── Run AI analysis ───────────────────────────────────────────────────────
   const analysis = await runResumeAnalysis({
     apiKey,
     jobDescription: role.job_description,
@@ -123,30 +89,27 @@ export async function POST(request: Request) {
     feedbackSignalCount: signalCount,
   });
 
-  // ── Save to Supabase ──────────────────────────────────────────────────────
-  const { error: insErr } = await supabase
-    .from("candidates")
-    .insert({
-      role_id: roleId,
-      resume_text: resumeText,
-      resume_filename: resumeFilename,
-      analysis,
-      jd_fit_score: analysis.jdFitScore,
-      role_fit_score: analysis.roleFitScore,
-      jd_fit_rationale: analysis.jdFitRationale,
-      role_fit_rationale: analysis.roleFitRationale,
-      source: "inbound",
-      applicant_name: fullName,
-      applicant_email: email,
-      applicant_phone: phone || null,
-      applicant_linkedin: linkedinUrl || null,
-      applicant_cover_note: coverNote || null,
-      applicant_portfolio: portfolioUrl || null,
-    });
+  const { error: insertError } = await supabase.from("candidates").insert({
+    role_id: roleId,
+    resume_text: resumeText,
+    resume_filename: file.name,
+    analysis,
+    jd_fit_score: analysis.jdFitScore,
+    role_fit_score: analysis.roleFitScore,
+    jd_fit_rationale: analysis.jdFitRationale,
+    role_fit_rationale: analysis.roleFitRationale,
+    source: "inbound",
+    applicant_name: fullName,
+    applicant_email: email,
+    applicant_phone: phone,
+    applicant_linkedin: linkedinUrl,
+    applicant_cover_note: coverNote,
+    applicant_portfolio: portfolioUrl,
+  });
 
-  if (insErr) {
+  if (insertError) {
     return NextResponse.json(
-      { error: "Failed to save application.", details: insErr.message },
+      { error: "Failed to save application.", details: insertError.message },
       { status: 500 }
     );
   }
