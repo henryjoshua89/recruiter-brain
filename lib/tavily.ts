@@ -1,23 +1,11 @@
 import { tavily } from "@tavily/core";
+import type { MarketIntelligence, MarketIntelligenceSearch, TalentFlowResearch } from "@/lib/types";
 
 // ── Shared types ──────────────────────────────────────────────────────────────
 export type TavilyFootprint = {
   summary: string;
   signals: string[];
   scoreBoost: number; // 0–1.0, applied to jd/role fit scores
-};
-
-export type MarketIntelligenceSearch = {
-  answer: string;
-  snippets: string[];
-};
-
-export type MarketIntelligence = {
-  companyIntelligence: MarketIntelligenceSearch;
-  talentPool: MarketIntelligenceSearch;
-  industryMetrics: MarketIntelligenceSearch;
-  roleTitle: string;
-  fetchedAt: string;
 };
 
 // ── Helper ────────────────────────────────────────────────────────────────────
@@ -72,8 +60,52 @@ export async function fetchJDEnrichment(params: {
     companyIntelligence: extract(compRes),
     talentPool: extract(talentRes),
     industryMetrics: extract(metricsRes),
+    talentFlowResearch: null,
     roleTitle,
     fetchedAt: new Date().toISOString(),
+  };
+}
+
+// ── Talent flow intelligence — feeder companies + movement patterns ───────────
+export async function fetchTalentFlow(params: {
+  roleTitle: string;
+  industry: string;
+  apiKey: string;
+}): Promise<TalentFlowResearch | null> {
+  const { roleTitle, industry, apiKey } = params;
+  const client = makeClient(apiKey);
+  const opts = { searchDepth: "basic" as const, maxResults: 5, includeAnswer: true };
+
+  const [feederRes, movementRes] = await Promise.allSettled([
+    client.search(
+      `"${roleTitle}" professionals India career background previous employer ${industry}`,
+      opts
+    ),
+    client.search(
+      `${industry} talent movement India ${roleTitle} career path 2024 2025 2026`,
+      opts
+    ),
+  ]);
+
+  function extract(r: PromiseSettledResult<Awaited<ReturnType<typeof client.search>>>): MarketIntelligenceSearch {
+    if (r.status === "rejected") return { answer: "", snippets: [] };
+    return {
+      answer: r.value.answer ?? "",
+      snippets: pickSnippets(r.value.results),
+    };
+  }
+
+  const feeder = extract(feederRes);
+  const movement = extract(movementRes);
+
+  // Return null if both searches failed / empty
+  if (!feeder.answer && !feeder.snippets.length && !movement.answer && !movement.snippets.length) {
+    return null;
+  }
+
+  return {
+    feederCompanies: feeder,
+    movementPatterns: movement,
   };
 }
 
@@ -93,14 +125,34 @@ export function formatMarketIntelligenceForPrompt(mi: MarketIntelligence): strin
     "INDUSTRY METRICS & KPIs:",
     mi.industryMetrics.answer || "(no summary available)",
     ...mi.industryMetrics.snippets.map((s) => `  • ${s}`),
+  ];
+
+  if (mi.talentFlowResearch) {
+    lines.push(
+      "",
+      "TALENT FLOW — FEEDER COMPANIES (where people in this role typically come from):",
+      mi.talentFlowResearch.feederCompanies.answer || "(no data)",
+      ...mi.talentFlowResearch.feederCompanies.snippets.map((s) => `  • ${s}`),
+      "",
+      "TALENT FLOW — MOVEMENT PATTERNS (how this talent segment moves in India):",
+      mi.talentFlowResearch.movementPatterns.answer || "(no data)",
+      ...mi.talentFlowResearch.movementPatterns.snippets.map((s) => `  • ${s}`)
+    );
+  }
+
+  lines.push(
     "",
     "Use the above to:",
     "- Cite current salary ranges in CANDIDATE_POOL_REALITY",
     "- Name real companies hiring for this role in TARGET_COMPANIES",
     "- Reference role-specific KPIs in DELIVERABLES",
     "- Ground company stage claims in ROLE_SUMMARY with evidence from the intelligence above",
-  ];
-  return lines.join("\n");
+    mi.talentFlowResearch
+      ? "- Use TALENT FLOW data to populate the TALENT_FLOW section with specific feeder companies, career path patterns, and sourcing directions"
+      : ""
+  );
+
+  return lines.filter((l) => l !== undefined).join("\n");
 }
 
 // ── Candidate digital footprint (for resume enrichment) ──────────────────────

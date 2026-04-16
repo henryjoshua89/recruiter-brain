@@ -3,6 +3,7 @@ import { supabase } from "@/lib/supabase";
 import { generateBriefing } from "@/lib/briefing-claude";
 import {
   fetchJDEnrichment,
+  fetchTalentFlow,
   formatMarketIntelligenceForPrompt,
   heuristicRoleTitleFromJD,
 } from "@/lib/tavily";
@@ -233,11 +234,18 @@ export async function PATCH(
   if (tavilyKey) {
     try {
       const roleTitle = heuristicRoleTitleFromJD(body.jobDescription.trim());
-      marketIntelligence = await fetchJDEnrichment({
-        companyName: company.name,
-        roleTitle,
-        apiKey: tavilyKey,
-      });
+      // Run JD enrichment + talent flow searches in parallel
+      const [jdEnrichment, talentFlowResult] = await Promise.all([
+        fetchJDEnrichment({ companyName: company.name, roleTitle, apiKey: tavilyKey }),
+        fetchTalentFlow({ roleTitle, industry: company.name, apiKey: tavilyKey }).catch((e) => {
+          console.error("Tavily talent flow failed (non-fatal):", e);
+          return null;
+        }),
+      ]);
+      marketIntelligence = {
+        ...jdEnrichment,
+        talentFlowResearch: talentFlowResult,
+      };
       marketIntelligenceContext = formatMarketIntelligenceForPrompt(marketIntelligence);
     } catch (e) {
       console.error("Tavily enrichment failed (non-fatal):", e);

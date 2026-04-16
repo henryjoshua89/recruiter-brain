@@ -17,10 +17,23 @@ export type MarketIntelligenceSearch = {
   snippets: string[];
 };
 
+export type TalentFlowResearch = {
+  feederCompanies: MarketIntelligenceSearch;
+  movementPatterns: MarketIntelligenceSearch;
+};
+
+export type TalentFlow = {
+  feederCompanies: string[];
+  careerPath: string;
+  sectorPatterns: string;
+  sourcingDirection: string;
+};
+
 export type MarketIntelligence = {
   companyIntelligence: MarketIntelligenceSearch;
   talentPool: MarketIntelligenceSearch;
   industryMetrics: MarketIntelligenceSearch;
+  talentFlowResearch: TalentFlowResearch | null;
   roleTitle: string;
   fetchedAt: string;
 };
@@ -37,6 +50,7 @@ export type BriefingSections = {
   };
   keyDeliverablesAndMetrics: string[];
   hmMeetingPrep: string[];
+  talentFlow?: TalentFlow | null;
 };
 
 export type NewRolePayload = {

@@ -5,7 +5,7 @@
  */
 
 import Anthropic from "@anthropic-ai/sdk";
-import type { BriefingSections, NewRolePayload } from "@/lib/types";
+import type { BriefingSections, NewRolePayload, TalentFlow } from "@/lib/types";
 
 const MODEL = "claude-sonnet-4-20250514";
 
@@ -17,6 +17,7 @@ const SECTION_HEADERS = [
   "SEARCH_DIRECTION",
   "DELIVERABLES",
   "HM_PREP",
+  "TALENT_FLOW",
 ] as const;
 
 export const SECTION_HEADER_RE = new RegExp(
@@ -26,6 +27,9 @@ export const SECTION_HEADER_RE = new RegExp(
 
 export const SEARCH_SUBHEADER_RE =
   /^(TARGET_COMPANIES|ALTERNATIVE_TITLES|SOURCING_CHANNELS):\s*/gim;
+
+export const TALENT_FLOW_SUBHEADER_RE =
+  /^(FEEDER_COMPANIES|CAREER_PATH|SECTOR_PATTERNS|SOURCING_DIRECTION):\s*/gim;
 
 export function briefingPromptDateIST(): string {
   return new Intl.DateTimeFormat("en-IN", {
@@ -150,6 +154,14 @@ Bullet measurable outcomes and success signals.
 HM_PREP:
 Exactly 5 questions for the hiring manager.
 
+TALENT_FLOW:
+Based on the market intelligence provided (or your knowledge if not provided), map where this talent comes from and how it moves. Use the four subsections below. Be specific — name real company types, cities, and patterns.
+
+FEEDER_COMPANIES: List the 4–8 most common prior employer types or named companies this talent typically comes from in India.
+CAREER_PATH: One paragraph on the typical career arc — where people start, how they progress, what milestone precedes this role.
+SECTOR_PATTERNS: Key patterns in how this talent segment moves across sectors in India (e.g., BFSI → fintech, consulting → startup).
+SOURCING_DIRECTION: Concrete action for where to look first — specific LinkedIn search angles, communities, or hunting grounds.
+
 ---
 
 OUTPUT FORMAT (plain text only — do NOT use JSON, markdown code fences, or XML):
@@ -183,6 +195,18 @@ DELIVERABLES:
 
 HM_PREP:
 (Exactly 5 questions, one per line; may number 1.–5. or use hyphen bullets.)
+
+TALENT_FLOW:
+(Include the four subsections below in this exact order.)
+
+FEEDER_COMPANIES:
+- …
+CAREER_PATH:
+(One paragraph.)
+SECTOR_PATTERNS:
+(One paragraph.)
+SOURCING_DIRECTION:
+(One paragraph.)
 
 ---
 
@@ -258,6 +282,24 @@ export function parseSearchDirectionBlock(
   };
 }
 
+export function parseTalentFlowBlock(block: string): TalentFlow | null {
+  if (!block.trim()) return null;
+  const sub = extractLabeledSections(
+    block,
+    new RegExp(TALENT_FLOW_SUBHEADER_RE.source, "gim")
+  );
+  const hasAny = ["FEEDER_COMPANIES", "CAREER_PATH", "SECTOR_PATTERNS", "SOURCING_DIRECTION"].some(
+    (k) => sub[k] !== undefined && sub[k].length > 0
+  );
+  if (!hasAny) return null;
+  return {
+    feederCompanies: linesToListItems(sub.FEEDER_COMPANIES ?? ""),
+    careerPath: proseFromBlock(sub.CAREER_PATH ?? ""),
+    sectorPatterns: proseFromBlock(sub.SECTOR_PATTERNS ?? ""),
+    sourcingDirection: proseFromBlock(sub.SOURCING_DIRECTION ?? ""),
+  };
+}
+
 export function parseBriefingPlainText(raw: string): BriefingSections {
   const text = stripOptionalMarkdownFence(raw);
   const sections = extractLabeledSections(
@@ -283,6 +325,7 @@ export function parseBriefingPlainText(raw: string): BriefingSections {
   if (hmPrep.length === 0 && (sections.HM_PREP ?? "").trim()) {
     hmPrep = [(sections.HM_PREP ?? "").trim()];
   }
+  const talentFlow = parseTalentFlowBlock(sections.TALENT_FLOW ?? "");
 
   return {
     roleSummary,
@@ -298,6 +341,7 @@ export function parseBriefingPlainText(raw: string): BriefingSections {
         ? deliverables
         : ["See role description for deliverables; refine with hiring manager."],
     hmMeetingPrep: hmPrep,
+    talentFlow: talentFlow ?? null,
   };
 }
 

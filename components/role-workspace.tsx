@@ -636,6 +636,65 @@ export default function RoleWorkspace({ roleId }: { roleId: string }) {
           <BriefingList title="Key deliverables & metrics" items={b.keyDeliverablesAndMetrics} />
           <BriefingList title="HM meeting prep" items={b.hmMeetingPrep} />
 
+          {/* Talent Flow Intelligence */}
+          {role.briefing.talentFlow ? (
+            <section className="rounded-xl border border-violet-200 bg-violet-50/40 p-5 shadow-sm">
+              <div className="mb-1 flex items-center gap-2">
+                <h2 className="text-sm font-semibold uppercase tracking-wide text-violet-800">
+                  Talent Flow · Market Intelligence
+                </h2>
+              </div>
+              <p className="mb-4 text-[11px] text-violet-500">
+                Based on public market data. Updates when briefing is regenerated.
+              </p>
+              <div className="grid gap-4 sm:grid-cols-2">
+                {/* Feeder companies */}
+                <div className="rounded-lg border border-violet-100 bg-white p-3">
+                  <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-violet-700">Feeder companies</p>
+                  {role.briefing.talentFlow.feederCompanies.length > 0 ? (
+                    <ul className="space-y-1">
+                      {role.briefing.talentFlow.feederCompanies.map((co, i) => (
+                        <li key={i} className="flex items-start gap-1.5 text-xs text-slate-700">
+                          <span className="mt-0.5 shrink-0 text-violet-400">·</span>
+                          {co}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="text-xs italic text-slate-400">No data available.</p>
+                  )}
+                </div>
+                {/* Career path */}
+                <div className="rounded-lg border border-violet-100 bg-white p-3">
+                  <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-violet-700">Typical career path</p>
+                  {role.briefing.talentFlow.careerPath ? (
+                    <p className="text-xs leading-relaxed text-slate-700">{role.briefing.talentFlow.careerPath}</p>
+                  ) : (
+                    <p className="text-xs italic text-slate-400">No data available.</p>
+                  )}
+                </div>
+                {/* Sector patterns */}
+                <div className="rounded-lg border border-violet-100 bg-white p-3">
+                  <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-violet-700">Sector movement patterns</p>
+                  {role.briefing.talentFlow.sectorPatterns ? (
+                    <p className="text-xs leading-relaxed text-slate-700">{role.briefing.talentFlow.sectorPatterns}</p>
+                  ) : (
+                    <p className="text-xs italic text-slate-400">No data available.</p>
+                  )}
+                </div>
+                {/* Sourcing direction */}
+                <div className="rounded-lg border border-violet-100 bg-white p-3">
+                  <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-violet-700">Where to look first</p>
+                  {role.briefing.talentFlow.sourcingDirection ? (
+                    <p className="text-xs leading-relaxed text-slate-700">{role.briefing.talentFlow.sourcingDirection}</p>
+                  ) : (
+                    <p className="text-xs italic text-slate-400">No data available.</p>
+                  )}
+                </div>
+              </div>
+            </section>
+          ) : null}
+
           {/* Market Intelligence */}
           {role.marketIntelligence ? (
             <section className="rounded-xl border border-indigo-200 bg-indigo-50/40 p-5 shadow-sm">
