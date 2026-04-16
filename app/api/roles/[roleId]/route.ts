@@ -1,5 +1,12 @@
 import { NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
+import { generateBriefing } from "@/lib/briefing-claude";
+import {
+  fetchJDEnrichment,
+  formatMarketIntelligenceForPrompt,
+  heuristicRoleTitleFromJD,
+} from "@/lib/tavily";
+import type { MarketIntelligence, NewRolePayload } from "@/lib/types";
 
 export async function GET(
   _request: Request,
@@ -165,4 +172,114 @@ export async function GET(
       annotationInsights,
     },
   });
+}
+
+// ── DELETE — permanently remove a role (candidates cascade via FK) ─────────
+export async function DELETE(
+  _request: Request,
+  context: { params: Promise<{ roleId: string }> }
+) {
+  const { roleId } = await context.params;
+
+  const { error } = await supabase.from("roles").delete().eq("id", roleId);
+  if (error) {
+    return NextResponse.json(
+      { error: "Failed to delete role.", details: error.message },
+      { status: 500 }
+    );
+  }
+  return NextResponse.json({ success: true });
+}
+
+// ── PATCH — regenerate briefing with updated inputs ────────────────────────
+export async function PATCH(
+  request: Request,
+  context: { params: Promise<{ roleId: string }> }
+) {
+  const { roleId } = await context.params;
+
+  const anthropicKey = process.env.ANTHROPIC_API_KEY;
+  if (!anthropicKey) {
+    return NextResponse.json({ error: "Missing ANTHROPIC_API_KEY." }, { status: 500 });
+  }
+
+  const body = (await request.json()) as {
+    companyId: string;
+    jobDescription: string;
+    internalContext: NewRolePayload["internalContext"];
+  };
+
+  if (!body.companyId || !body.jobDescription?.trim()) {
+    return NextResponse.json(
+      { error: "companyId and jobDescription are required." },
+      { status: 400 }
+    );
+  }
+
+  const { data: company, error: coErr } = await supabase
+    .from("companies")
+    .select("id, name, website_url, public_context")
+    .eq("id", body.companyId)
+    .single();
+
+  if (coErr || !company) {
+    return NextResponse.json({ error: "Company not found." }, { status: 404 });
+  }
+
+  // Tavily market intelligence (non-fatal)
+  const tavilyKey = process.env.TAVILY_API_KEY;
+  let marketIntelligence: MarketIntelligence | null = null;
+  let marketIntelligenceContext: string | null = null;
+  if (tavilyKey) {
+    try {
+      const roleTitle = heuristicRoleTitleFromJD(body.jobDescription.trim());
+      marketIntelligence = await fetchJDEnrichment({
+        companyName: company.name,
+        roleTitle,
+        apiKey: tavilyKey,
+      });
+      marketIntelligenceContext = formatMarketIntelligenceForPrompt(marketIntelligence);
+    } catch (e) {
+      console.error("Tavily enrichment failed (non-fatal):", e);
+    }
+  }
+
+  // Generate new briefing using shared lib
+  let parsed;
+  try {
+    parsed = await generateBriefing({
+      apiKey: anthropicKey,
+      companyName: company.name,
+      companyWebsite: company.website_url,
+      companyContext: (company.public_context ?? null) as Record<string, unknown> | null,
+      jobDescription: body.jobDescription.trim(),
+      internalContext: body.internalContext,
+      marketIntelligenceContext,
+    });
+  } catch (e) {
+    return NextResponse.json(
+      { error: e instanceof Error ? e.message : "Briefing generation failed." },
+      { status: 500 }
+    );
+  }
+
+  // Update existing role in Supabase
+  const { error: updateErr } = await supabase
+    .from("roles")
+    .update({
+      job_description: body.jobDescription.trim(),
+      internal_context: body.internalContext,
+      briefing: parsed,
+      market_intelligence: marketIntelligence ?? null,
+    })
+    .eq("id", roleId);
+
+  if (updateErr) {
+    return NextResponse.json(
+      { error: "Failed to update role.", details: updateErr.message },
+      { status: 500 }
+    );
+  }
+
+  return NextResponse.json({ briefing: parsed, marketIntelligence });
 }

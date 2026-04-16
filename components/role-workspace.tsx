@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { FormEvent, Fragment, useCallback, useEffect, useState } from "react";
 import { normalizeScoreBreakdown } from "@/lib/score-breakdown";
-import type { BriefingSections, MarketIntelligence } from "@/lib/types";
+import type { BriefingSections, InternalContextPayload, MarketIntelligence } from "@/lib/types";
 import CandidateCard, { type CandidateWithFeedback } from "./candidate-card";
 import ScoreWithTooltip from "./score-with-tooltip";
 
@@ -94,6 +94,96 @@ export default function RoleWorkspace({ roleId }: { roleId: string }) {
   const [comparisonRec, setComparisonRec] = useState<string | null>(null);
   const [comparisonLoading, setComparisonLoading] = useState(false);
   const [comparisonError, setComparisonError] = useState<string | null>(null);
+
+  // ── Edit Briefing modal state ─────────────────────────────────────────────
+  const [showEditBriefing, setShowEditBriefing] = useState(false);
+  const [editStep, setEditStep] = useState(1);
+  const [editCompanyName, setEditCompanyName] = useState("");
+  const [editWebsiteUrl, setEditWebsiteUrl] = useState("");
+  const [editCompanyId, setEditCompanyId] = useState("");
+  const [editCompanyContextSaved, setEditCompanyContextSaved] = useState(false);
+  const [editInternalContext, setEditInternalContext] = useState<InternalContextPayload>({
+    whyRoleOpen: "", successIn90Days: "", nonNegotiables: "",
+    hiringManagerStyle: "", teamStructure: "", whyLastPersonLeft: "",
+  });
+  const [editJobDescription, setEditJobDescription] = useState("");
+  const [editLoading, setEditLoading] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+  const [regenerateSuccess, setRegenerateSuccess] = useState(false);
+
+  function openEditBriefing() {
+    if (!role) return;
+    setEditCompanyName(role.company?.name ?? "");
+    setEditWebsiteUrl(role.company?.websiteUrl ?? "");
+    setEditCompanyId(role.company?.id ?? "");
+    setEditCompanyContextSaved(!!role.company?.id);
+    const ctx = role.internalContext as InternalContextPayload | null;
+    setEditInternalContext({
+      whyRoleOpen: ctx?.whyRoleOpen ?? "",
+      successIn90Days: ctx?.successIn90Days ?? "",
+      nonNegotiables: ctx?.nonNegotiables ?? "",
+      hiringManagerStyle: ctx?.hiringManagerStyle ?? "",
+      teamStructure: ctx?.teamStructure ?? "",
+      whyLastPersonLeft: ctx?.whyLastPersonLeft ?? "",
+    });
+    setEditJobDescription(role.jobDescription ?? "");
+    setEditStep(1);
+    setEditError(null);
+    setRegenerateSuccess(false);
+    setShowEditBriefing(true);
+  }
+
+  async function editSaveCompany(e: React.FormEvent) {
+    e.preventDefault();
+    setEditError(null);
+    setEditLoading(true);
+    try {
+      const res = await fetch("/api/company-context", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ companyName: editCompanyName, websiteUrl: editWebsiteUrl }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to save company.");
+      setEditCompanyId(data.company.id);
+      setEditCompanyContextSaved(true);
+      setEditStep(2);
+    } catch (err) {
+      setEditError(err instanceof Error ? err.message : "Something went wrong.");
+    } finally {
+      setEditLoading(false);
+    }
+  }
+
+  async function editRegenerateBriefing(e: React.FormEvent) {
+    e.preventDefault();
+    setEditError(null);
+    setEditLoading(true);
+    try {
+      const res = await fetch(`/api/roles/${roleId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          companyId: editCompanyId,
+          jobDescription: editJobDescription,
+          internalContext: editInternalContext,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Regeneration failed.");
+      setRegenerateSuccess(true);
+      await loadRole();
+      setTimeout(() => {
+        setShowEditBriefing(false);
+        setRegenerateSuccess(false);
+        setTab("briefing");
+      }, 1500);
+    } catch (err) {
+      setEditError(err instanceof Error ? err.message : "Something went wrong.");
+    } finally {
+      setEditLoading(false);
+    }
+  }
 
   const loadRole = useCallback(async () => {
     const res = await fetch(`/api/roles/${roleId}`);
@@ -516,6 +606,17 @@ export default function RoleWorkspace({ roleId }: { roleId: string }) {
 
       {tab === "briefing" ? (
         <div className="space-y-4">
+          {/* Edit Briefing button */}
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={openEditBriefing}
+              className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
+            >
+              ✏️ Edit Briefing
+            </button>
+          </div>
+
           <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
             <h2 className="text-sm font-semibold uppercase tracking-wide text-blue-800">Role summary</h2>
             <p className="mt-2 whitespace-pre-wrap text-sm text-slate-800">{b.roleSummary}</p>
@@ -917,6 +1018,158 @@ export default function RoleWorkspace({ roleId }: { roleId: string }) {
           </section>
         </div>
       )}
+      {/* Edit Briefing Modal */}
+      {showEditBriefing ? (
+        <div
+          className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/50 px-4 py-8"
+          onClick={() => { if (!editLoading) setShowEditBriefing(false); }}
+        >
+          <div
+            className="relative w-full max-w-2xl rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="mb-5 flex items-center justify-between">
+              <div>
+                <h2 className="text-lg font-semibold text-slate-950">Edit Briefing</h2>
+                <p className="text-xs text-slate-500">Step {editStep} of 3</p>
+              </div>
+              <button
+                type="button"
+                disabled={editLoading}
+                onClick={() => setShowEditBriefing(false)}
+                className="rounded-lg border border-slate-200 p-1.5 text-slate-400 hover:bg-slate-50 hover:text-slate-600 disabled:opacity-50"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+                  <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Progress bar */}
+            <div className="mb-5 h-1.5 overflow-hidden rounded-full bg-slate-100">
+              <div
+                className="h-full rounded-full bg-blue-600 transition-all duration-300"
+                style={{ width: `${(editStep / 3) * 100}%` }}
+              />
+            </div>
+
+            {editError ? (
+              <div className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                {editError}
+              </div>
+            ) : null}
+
+            {regenerateSuccess ? (
+              <div className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+                ✓ Briefing regenerated successfully
+              </div>
+            ) : null}
+
+            {/* Step 1 — Company */}
+            {editStep === 1 ? (
+              <form className="space-y-4" onSubmit={editSaveCompany}>
+                <div>
+                  <label className="mb-1.5 block text-sm font-medium text-slate-700">Company name</label>
+                  <input
+                    required
+                    value={editCompanyName}
+                    onChange={(e) => setEditCompanyName(e.target.value)}
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1.5 block text-sm font-medium text-slate-700">Company website URL</label>
+                  <input
+                    required
+                    value={editWebsiteUrl}
+                    onChange={(e) => setEditWebsiteUrl(e.target.value)}
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-500"
+                  />
+                </div>
+                <div className="flex gap-3">
+                  <button
+                    type="submit"
+                    disabled={editLoading}
+                    className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
+                  >
+                    {editLoading ? "Fetching…" : "Save & Continue"}
+                  </button>
+                  {editCompanyContextSaved ? (
+                    <button
+                      type="button"
+                      onClick={() => setEditStep(2)}
+                      className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                    >
+                      Skip (keep existing)
+                    </button>
+                  ) : null}
+                </div>
+              </form>
+            ) : null}
+
+            {/* Step 2 — Internal Context */}
+            {editStep === 2 ? (
+              <form
+                className="space-y-4"
+                onSubmit={(e) => { e.preventDefault(); setEditStep(3); }}
+              >
+                {([
+                  { key: "whyRoleOpen", label: "Why is this role open", required: true },
+                  { key: "successIn90Days", label: "Success in the first 90 days", required: true },
+                  { key: "nonNegotiables", label: "Non-negotiables not in the JD", required: true },
+                  { key: "hiringManagerStyle", label: "Hiring manager name & style", required: true },
+                  { key: "teamStructure", label: "Team size and structure", required: true },
+                  { key: "whyLastPersonLeft", label: "Why did the last person leave (optional)", required: false },
+                ] as { key: keyof InternalContextPayload; label: string; required: boolean }[]).map((field) => (
+                  <div key={field.key}>
+                    <label className="mb-1.5 block text-sm font-medium text-slate-700">{field.label}</label>
+                    <textarea
+                      required={field.required}
+                      rows={2}
+                      value={editInternalContext[field.key] ?? ""}
+                      onChange={(e) =>
+                        setEditInternalContext((prev) => ({ ...prev, [field.key]: e.target.value }))
+                      }
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-500"
+                    />
+                  </div>
+                ))}
+                <div className="flex gap-3">
+                  <button type="button" onClick={() => setEditStep(1)} className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Back</button>
+                  <button type="submit" className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">Save & Continue</button>
+                </div>
+              </form>
+            ) : null}
+
+            {/* Step 3 — JD + Regenerate */}
+            {editStep === 3 ? (
+              <form className="space-y-4" onSubmit={editRegenerateBriefing}>
+                <div>
+                  <label className="mb-1.5 block text-sm font-medium text-slate-700">Job description</label>
+                  <textarea
+                    required
+                    rows={14}
+                    value={editJobDescription}
+                    onChange={(e) => setEditJobDescription(e.target.value)}
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-500"
+                  />
+                </div>
+                <div className="flex gap-3">
+                  <button type="button" onClick={() => setEditStep(2)} disabled={editLoading} className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50">Back</button>
+                  <button
+                    type="submit"
+                    disabled={editLoading || editJobDescription.trim().length < 50}
+                    className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
+                  >
+                    {editLoading ? "Regenerating…" : "Regenerate Briefing"}
+                  </button>
+                </div>
+              </form>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
     </main>
   );
 }
