@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { FormEvent, Fragment, useCallback, useEffect, useState } from "react";
 import { normalizeScoreBreakdown } from "@/lib/score-breakdown";
-import type { BriefingSections } from "@/lib/types";
+import type { BriefingSections, MarketIntelligence } from "@/lib/types";
 import CandidateCard, { type CandidateWithFeedback } from "./candidate-card";
 import ScoreWithTooltip from "./score-with-tooltip";
 
@@ -55,6 +55,7 @@ type RoleDetail = {
   scoringCalibration: ScoringCalibration;
   annotations: RoleAnnotation[];
   annotationInsights: AnnotationInsightsData;
+  marketIntelligence: MarketIntelligence | null;
 };
 
 type DuplicateState = {
@@ -114,6 +115,7 @@ export default function RoleWorkspace({ roleId }: { roleId: string }) {
         topStrengths: [],
         topConcerns: [],
       },
+      marketIntelligence: (data.role.marketIntelligence as MarketIntelligence | null) ?? null,
     });
     setFeedbackSignalCount(data.role.feedbackSignalCount ?? 0);
   }, [roleId]);
@@ -502,6 +504,12 @@ export default function RoleWorkspace({ roleId }: { roleId: string }) {
             >
               Briefing
             </button>
+            <Link
+              href={`/roles/${roleId}/dashboard`}
+              className="rounded-md px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            >
+              Dashboard
+            </Link>
           </div>
         </div>
       </div>
@@ -526,6 +534,70 @@ export default function RoleWorkspace({ roleId }: { roleId: string }) {
           <BriefingList title="Search — sourcing channels" items={b.searchDirection.sourcingChannels} />
           <BriefingList title="Key deliverables & metrics" items={b.keyDeliverablesAndMetrics} />
           <BriefingList title="HM meeting prep" items={b.hmMeetingPrep} />
+
+          {/* Market Intelligence */}
+          {role.marketIntelligence ? (
+            <section className="rounded-xl border border-indigo-200 bg-indigo-50/40 p-5 shadow-sm">
+              <div className="mb-4 flex items-center gap-2">
+                <h2 className="text-sm font-semibold uppercase tracking-wide text-indigo-800">
+                  Market Intelligence
+                </h2>
+                <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-indigo-700">
+                  Live · {new Date(role.marketIntelligence.fetchedAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+                </span>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-3">
+                {/* Company intelligence */}
+                <div className="rounded-lg border border-indigo-100 bg-white p-3">
+                  <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-indigo-700">Company signals</p>
+                  {role.marketIntelligence.companyIntelligence.answer ? (
+                    <p className="text-xs text-slate-700 leading-relaxed">{role.marketIntelligence.companyIntelligence.answer.slice(0, 400)}</p>
+                  ) : (
+                    <p className="text-xs italic text-slate-400">No data available.</p>
+                  )}
+                  {role.marketIntelligence.companyIntelligence.snippets.length > 0 ? (
+                    <ul className="mt-2 space-y-1">
+                      {role.marketIntelligence.companyIntelligence.snippets.slice(0, 2).map((s, i) => (
+                        <li key={i} className="text-[11px] text-slate-500 line-clamp-2">· {s}</li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </div>
+                {/* Talent pool */}
+                <div className="rounded-lg border border-indigo-100 bg-white p-3">
+                  <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-indigo-700">Talent pool · India</p>
+                  {role.marketIntelligence.talentPool.answer ? (
+                    <p className="text-xs text-slate-700 leading-relaxed">{role.marketIntelligence.talentPool.answer.slice(0, 400)}</p>
+                  ) : (
+                    <p className="text-xs italic text-slate-400">No data available.</p>
+                  )}
+                  {role.marketIntelligence.talentPool.snippets.length > 0 ? (
+                    <ul className="mt-2 space-y-1">
+                      {role.marketIntelligence.talentPool.snippets.slice(0, 2).map((s, i) => (
+                        <li key={i} className="text-[11px] text-slate-500 line-clamp-2">· {s}</li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </div>
+                {/* Industry metrics */}
+                <div className="rounded-lg border border-indigo-100 bg-white p-3">
+                  <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-indigo-700">Industry KPIs</p>
+                  {role.marketIntelligence.industryMetrics.answer ? (
+                    <p className="text-xs text-slate-700 leading-relaxed">{role.marketIntelligence.industryMetrics.answer.slice(0, 400)}</p>
+                  ) : (
+                    <p className="text-xs italic text-slate-400">No data available.</p>
+                  )}
+                  {role.marketIntelligence.industryMetrics.snippets.length > 0 ? (
+                    <ul className="mt-2 space-y-1">
+                      {role.marketIntelligence.industryMetrics.snippets.slice(0, 2).map((s, i) => (
+                        <li key={i} className="text-[11px] text-slate-500 line-clamp-2">· {s}</li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </div>
+              </div>
+            </section>
+          ) : null}
         </div>
       ) : (
         <div className="space-y-8">

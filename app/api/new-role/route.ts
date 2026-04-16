@@ -1,7 +1,12 @@
 import { NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { supabase } from "@/lib/supabase";
-import type { BriefingSections, NewRolePayload } from "@/lib/types";
+import type { BriefingSections, MarketIntelligence, NewRolePayload } from "@/lib/types";
+import {
+  fetchJDEnrichment,
+  formatMarketIntelligenceForPrompt,
+  heuristicRoleTitleFromJD,
+} from "@/lib/tavily";
 
 const anthropicKey = process.env.ANTHROPIC_API_KEY;
 
@@ -85,12 +90,14 @@ function buildPrompt({
   companyContext,
   jobDescription,
   internalContext,
+  marketIntelligenceContext,
 }: {
   companyName: string;
   companyWebsite: string;
   companyContext: Record<string, unknown> | null;
   jobDescription: string;
   internalContext: NewRolePayload["internalContext"];
+  marketIntelligenceContext?: string | null;
 }) {
   const companyBlock = formatCompanyContextForPrompt(companyContext);
   const today = briefingPromptDateIST();
@@ -121,7 +128,7 @@ INPUT — INTERNAL CONTEXT (from the recruiter; treat as authoritative for polit
 - Team size and structure: ${internalContext.teamStructure}
 - Why previous person left: ${internalContext.whyLastPersonLeft || "Not provided"}
 
-INPUT — FULL JOB DESCRIPTION:
+${marketIntelligenceContext ? marketIntelligenceContext + "\n\n" : ""}INPUT — FULL JOB DESCRIPTION:
 ${jobDescription}
 
 ---
@@ -337,6 +344,24 @@ export async function POST(request: Request) {
       );
     }
 
+    // ── Tavily market intelligence (non-fatal) ──────────────────────────────
+    const tavilyKey = process.env.TAVILY_API_KEY;
+    let marketIntelligence: MarketIntelligence | null = null;
+    let marketIntelligenceContext: string | null = null;
+    if (tavilyKey) {
+      try {
+        const roleTitle = heuristicRoleTitleFromJD(body.jobDescription.trim());
+        marketIntelligence = await fetchJDEnrichment({
+          companyName: company.name,
+          roleTitle,
+          apiKey: tavilyKey,
+        });
+        marketIntelligenceContext = formatMarketIntelligenceForPrompt(marketIntelligence);
+      } catch (e) {
+        console.error("Tavily enrichment failed (non-fatal):", e);
+      }
+    }
+
     const anthropic = new Anthropic({ apiKey: anthropicKey });
     const message = await anthropic.messages.create({
       model: "claude-sonnet-4-20250514",
@@ -352,6 +377,7 @@ export async function POST(request: Request) {
               null) as Record<string, unknown> | null,
             jobDescription: body.jobDescription.trim(),
             internalContext: body.internalContext,
+            marketIntelligenceContext,
           }),
         },
       ],
@@ -374,6 +400,7 @@ export async function POST(request: Request) {
         job_description: body.jobDescription.trim(),
         internal_context: body.internalContext,
         briefing: parsed,
+        market_intelligence: marketIntelligence ?? null,
       })
       .select("id, created_at")
       .single();
@@ -389,6 +416,7 @@ export async function POST(request: Request) {
       roleId: role.id,
       createdAt: role.created_at,
       briefing: parsed,
+      marketIntelligence: marketIntelligence ?? null,
       company: {
         id: company.id,
         name: company.name,

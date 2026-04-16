@@ -65,6 +65,9 @@ function ensureAnalysisShape(data: unknown): ResumeAnalysisPayload {
       d.roleFitBreakdown,
       roleFitRationale
     ),
+    marketAlignment: Array.isArray(d.marketAlignment)
+      ? (d.marketAlignment as unknown[]).map(String)
+      : [],
   };
 }
 
@@ -95,30 +98,73 @@ CALIBRATION_FROM_PRIOR_FEEDBACK: There are ${args.feedbackSignalCount} feedback 
 CALIBRATION_FROM_PRIOR_FEEDBACK: None yet (fewer than 5 recruiter feedback signals on this role). Set role_fit_score equal to jd_fit_score and state that role fit will calibrate as more feedback is collected.
 `;
 
+  const annotationBlock = args.annotationPatterns
+    ? `
+RECRUITER ANNOTATION PATTERNS — HIGH PRIORITY SIGNAL (read before scoring):
+The following patterns were extracted from the recruiter's own voice annotations on previously reviewed candidates for this exact role. They represent the recruiter's expressed preferences and aversions in their own words and carry significant weight:
+- A pattern expressing dislike of a candidate type (e.g. "candidates from services firms feel too slow") MUST reduce role_fit_score by at least 2 points for matching candidates, regardless of jd_fit_score.
+- A pattern expressing preference (e.g. "loves early-stage startup experience") MUST increase role_fit_score proportionally.
+- You MUST reference how annotation patterns influenced scoring in roleFitRationale. If they had no material effect, state that explicitly.
+Patterns:
+${args.annotationPatterns}
+`
+    : "";
+
   return `
-You are a senior search partner and recruiter with 20 years of experience in the India talent market. You are accountable for every hiring recommendation: your scores will be challenged by hiring managers and leadership. Be honest, critical, and precise — not generous. If someone does not meet the bar, scores of 5 or below are not only allowed but required.
+You are a senior search partner with 20 years of experience operating exclusively in the India talent market. Your assessments are reviewed by hiring managers and C-suite stakeholders who will push back on inflated scores. Be honest, critical, and precise. A generous score that does not reflect reality wastes a client's time.
 
-SCORING PHILOSOPHY:
-- Use the FULL 0–10 scale. A 7 must feel clearly stronger than a 6; a 4 clearly weaker than a 5. Do NOT cluster everyone between 6 and 8.
-- Differentiate candidates meaningfully. Tie-break using depth of direct (not adjacent) experience, evidence on the resume, and India-market realism.
+═══ INDIA TALENT MARKET CONTEXT ═══
+Apply these India-specific heuristics throughout your analysis:
 
-JD FIT SCORE (0–10):
-- Decompose the JD into concrete requirements (must-haves vs nice-to-haves). Weight must-haves heavily; missing a stated must-have should materially lower the score.
-- Reward DIRECT experience (same function, domain, and scope as the JD) over adjacent or transferable experience.
-- Penalise missing skills, wrong seniority, wrong industry where the JD is explicit, and weak evidence (vague bullets with no outcomes).
-- Cross-check with the Phase 1 briefing and internal context for hidden bar-raisers (non-negotiables, team context).
+EDUCATION TIERS (mention tier in keySignals if relevant):
+- Tier 1 — Strong positive signal: IIT, IIM, BITS Pilani, NIT (top-5), SRCC, LSR, ISB, SP Jain, XLRI
+- Tier 2 — Neutral: Other NITs, state-government engineering colleges, mid-tier MBA programmes
+- Tier 3 — No signal: Private deemed universities not in Tier 1 or 2
 
-ROLE FIT SCORE (0–10):
-- ${args.feedbackSignalCount >= 5 && args.calibration ? "This score reflects what we have learned from recruiter feedback on THIS role (see CALIBRATION block): who gets shortlisted vs rejected, stability vs skills trade-offs, industry fit, etc. It is NOT a repeat of JD fit — apply the calibration guidance to adjust up or down from what JD fit alone would suggest, when justified." : "Until calibration exists, set role_fit_score EQUAL to jd_fit_score (same integer). Still output roleFitBreakdown: mirror jdFitBreakdown for strengths/weaknesses/biggestFactor, but phrase biggestFactor to note that role-level calibration will refine this once more recruiter feedback exists."}
-- When calibration applies: score against \"what good looks like for this mandate in practice\" including patterns from feedback, not only literal JD text.
+COMPANY TIERS (use to calibrate rigor of experience claims):
+- Tier A — Strong signal (peer to global Tier-1 tech): Flipkart, Zomato, Swiggy, Razorpay, CRED, PhonePe, Meesho, Groww, Zepto, Juspay, Urban Company, Lenskart, Dream11, Nykaa, ShareChat; also Google/Microsoft/Amazon/Uber India centres
+- Tier B — Moderate signal: Well-funded Series B–D startups, large NBFCs, HDFC/ICICI/Axis in specialist roles, Tata Digital, Reliance Retail (digital)
+- Tier C — Weaker signal for product/growth roles: TCS, Infosys, Wipro, HCL, Tech Mahindra, Cognizant, Capgemini (IT services). Flag as mismatch when JD requires product/startup/growth experience.
 
-TRANSPARENCY (required for trust):
-- jdFitBreakdown and roleFitBreakdown MUST each contain exactly:
-  - strengths: array of 2 or 3 SHORT specific strings (what helped the score — cite concrete resume/JD evidence).
-  - weaknesses: array of 2 or 3 SHORT specific strings (what hurt the score — gaps, risks, or misses).
-  - biggestFactor: ONE string — the single clearest driver of that score (could be positive or negative).
+NOTICE PERIODS: Standard India notice periods are 30, 60, or 90 days. A 90-day notice is the norm at mid-senior levels — do NOT penalise it. Flag in missingForRole ONLY if the JD or internal context explicitly requires an immediate or ≤30-day joiner.
 
-Return STRICT JSON ONLY (no markdown fences). Use this exact shape and keys:
+═══ STRICT SCORING MANDATE ═══
+Use the FULL 0–10 scale. Grade inflation is the most common failure mode — resist it.
+
+Score bands:
+- 9–10 · Exceptional: Meets ALL must-haves AND non-negotiables, directly comparable scope/impact, Tier A company. Fewer than 1 in 20 candidates.
+- 7–8 · Strong: Meets all must-haves with minor gaps on nice-to-haves. A 7 is already a confident shortlist candidate.
+- 5–6 · Adequate: Meets most must-haves but has one meaningful gap, weaker market signal, or unverified claims.
+- 3–4 · Weak: Missing a key must-have OR significant red flag (instability, wrong industry where JD is explicit, services background for a product role).
+- 0–2 · Unsuitable: Fundamentally wrong domain or completely fails the non-negotiables.
+
+MANDATORY DEDUCTION RULE:
+Each missing must-have skill or non-negotiable (from JD or INTERNAL CONTEXT.nonNegotiables) deducts a MINIMUM of 2 points from jdFitScore before any positive adjustments. Two missing must-haves = minimum 4-point deduction. Document each deduction explicitly in jdFitRationale.
+
+═══ JD FIT SCORE ═══
+1. Extract must-haves vs nice-to-haves from the JD and briefing nonNegotiables.
+2. Apply the mandatory deduction rule for each missing must-have.
+3. Reward DIRECT experience (same function, domain, scope) — not adjacent or transferable.
+4. Penalise: wrong seniority, wrong industry where explicit, vague bullets with no outcomes, Tier C background when JD requires Tier A.
+
+═══ ROLE FIT SCORE ═══
+${args.feedbackSignalCount >= 5 && args.calibration
+  ? "This score reflects what this recruiter has actually signalled through feedback on this exact role (see CALIBRATION block). Apply calibration guidance to adjust up or down from JD fit — it is NOT a repeat of JD fit. ALSO apply the ANNOTATION PATTERNS block if present: annotation patterns are first-person recruiter signals and may override calibration on specific dimensions."
+  : "No calibration yet — set role_fit_score EQUAL to jd_fit_score. HOWEVER, still apply ANNOTATION PATTERNS above if they exist: they are direct recruiter voice and must influence role_fit_score even before formal calibration. Explain in roleFitRationale."}
+
+═══ CONTEXTUAL GAP EVALUATION ═══
+Use INTERNAL CONTEXT fields whyRoleOpen, successIn90Days, and nonNegotiables:
+- If the candidate meets ALL non-negotiables, a career gap of up to 12 months is NOT a dealbreaker — include in employmentGaps with a neutral note but NOT in missingForRole.
+- If the candidate is missing one or more non-negotiables, any career gap compounds the concern — flag in both employmentGaps and missingForRole.
+- If whyRoleOpen indicates a growth/scale trigger, weight scale-up experience heavily.
+
+═══ TRANSPARENCY ═══
+jdFitBreakdown and roleFitBreakdown MUST each contain:
+- strengths: 2–3 SHORT specific strings citing concrete resume/JD evidence
+- weaknesses: 2–3 SHORT specific strings citing gaps, risks, or misses
+- biggestFactor: ONE string — the single clearest driver of that score
+
+Return STRICT JSON ONLY (no markdown fences):
 
 {
   "fullName": "string",
@@ -138,8 +184,8 @@ Return STRICT JSON ONLY (no markdown fences). Use this exact shape and keys:
   "suggestedScreeningQuestions": ["string"],
   "jdFitScore": number,
   "roleFitScore": number,
-  "jdFitRationale": "2-3 sentences, plain prose",
-  "roleFitRationale": "2-3 sentences, plain prose",
+  "jdFitRationale": "2-3 sentences — must name any mandatory deductions applied",
+  "roleFitRationale": "2-3 sentences — must state how annotation patterns and/or calibration influenced the score",
   "jdFitBreakdown": {
     "strengths": ["2-3 items"],
     "weaknesses": ["2-3 items"],
@@ -149,13 +195,18 @@ Return STRICT JSON ONLY (no markdown fences). Use this exact shape and keys:
     "strengths": ["2-3 items"],
     "weaknesses": ["2-3 items"],
     "biggestFactor": "one decisive sentence"
-  }
+  },
+  "marketAlignment": [
+    "string — specific Indian company archetype or career trajectory this candidate resembles (e.g. 'Mid-level Flipkart growth PM, 4-6 YOE, scaling 1→10 products')",
+    "string — second alignment (may contrast, e.g. 'TCS-to-startup transition — strong execution but limited product ownership')"
+  ]
 }
 
 Rules:
 - jdFitScore and roleFitScore: integers 0–10 only.
-- ${args.feedbackSignalCount >= 5 && args.calibration ? "roleFitScore may differ from jdFitScore; roleFitBreakdown must reflect calibration-informed judgment." : "roleFitScore MUST equal jdFitScore. roleFitBreakdown should align with jdFitBreakdown (you may slightly rephrase biggestFactor to mention pending calibration)."}
-- Be critical: many average candidates should land in the 4–6 range if evidence is thin.
+- ${args.feedbackSignalCount >= 5 && args.calibration ? "roleFitScore may differ from jdFitScore; roleFitBreakdown must reflect calibration-informed and annotation-informed judgment." : "roleFitScore MUST equal jdFitScore unless annotation patterns justify a deviation. Note pending calibration in biggestFactor."}
+- Apply mandatory deductions before assigning jdFitScore — document them in jdFitRationale.
+- marketAlignment: exactly 2–3 entries, specific to the India market, named archetypes preferred over vague descriptions.
 
 JOB DESCRIPTION:
 ${args.jobDescription}
@@ -170,9 +221,7 @@ RESUME TEXT:
 ${args.resumeText}
 
 ${calBlock}
-
-${args.annotationPatterns ? `RECRUITER ANNOTATION PATTERNS FOR THIS ROLE SO FAR:\n${args.annotationPatterns}` : ""}
-`.trim();
+${annotationBlock}`.trim();
 }
 
 export async function runResumeAnalysis(args: {

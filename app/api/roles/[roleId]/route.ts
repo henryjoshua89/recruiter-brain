@@ -19,6 +19,7 @@ export async function GET(
       scoring_calibration,
       scoring_calibration_at,
       scoring_calibration_feedback_count,
+      market_intelligence,
       created_at,
       companies ( id, name, website_url, public_context )
     `
@@ -159,6 +160,7 @@ export async function GET(
         : null,
       candidateCount: candidateCount ?? 0,
       feedbackSignalCount: feedbackCount ?? 0,
+      marketIntelligence: role.market_intelligence ?? null,
       annotations,
       annotationInsights,
     },

@@ -12,6 +12,19 @@ export type InternalContextPayload = {
   whyLastPersonLeft?: string;
 };
 
+export type MarketIntelligenceSearch = {
+  answer: string;
+  snippets: string[];
+};
+
+export type MarketIntelligence = {
+  companyIntelligence: MarketIntelligenceSearch;
+  talentPool: MarketIntelligenceSearch;
+  industryMetrics: MarketIntelligenceSearch;
+  roleTitle: string;
+  fetchedAt: string;
+};
+
 export type BriefingSections = {
   roleSummary: string;
   conceptDefinitions: string[];
@@ -65,6 +78,7 @@ export type ResumeAnalysisPayload = {
   roleFitRationale: string;
   jdFitBreakdown: ScoreBreakdown;
   roleFitBreakdown: ScoreBreakdown;
+  marketAlignment: string[];
   rawText?: string;
 };
 
