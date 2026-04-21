@@ -46,7 +46,7 @@ export async function POST(request: Request) {
     let marketIntelligenceContext: string | null = null;
     if (tavilyKey) {
       try {
-        const roleTitle = heuristicRoleTitleFromJD(body.jobDescription.trim());
+        const roleTitle = heuristicRoleTitleFromJD(body.jobDescription.trim(), company.name);
         // Run JD enrichment + talent flow searches in parallel
         const [jdEnrichment, talentFlowResult] = await Promise.all([
           fetchJDEnrichment({ companyName: company.name, roleTitle, apiKey: tavilyKey }),
