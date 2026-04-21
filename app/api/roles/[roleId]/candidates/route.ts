@@ -3,6 +3,8 @@ import { supabase } from "@/lib/supabase";
 import { extractPdfText } from "@/lib/extract-pdf-text";
 import { parseCalibrationFromRoleRow } from "@/lib/calibration-db";
 import { runResumeAnalysis } from "@/lib/resume-claude";
+import { updateTalentFlowOnAnalysis } from "@/lib/talent-flow-db";
+import type { ResumeCompanyEntry } from "@/lib/types";
 
 export const runtime = "nodejs";
 
@@ -280,6 +282,12 @@ export async function POST(
       );
     }
 
+    // Update talent flow totals (non-fatal — companies may have changed on re-analyse)
+    updateTalentFlowOnAnalysis(
+      roleId,
+      (analysis.companies ?? []) as ResumeCompanyEntry[]
+    ).catch((e) => console.error("talent-flow reanalyse update failed (non-fatal):", e));
+
     return NextResponse.json({
       candidate: { ...updated, latestFeedback: null },
       reanalysed: true,
@@ -337,6 +345,12 @@ export async function POST(
       { status: 500 }
     );
   }
+
+  // Update talent flow totals — fire-and-forget, non-fatal
+  updateTalentFlowOnAnalysis(
+    roleId,
+    (analysis.companies ?? []) as ResumeCompanyEntry[]
+  ).catch((e) => console.error("talent-flow insert update failed (non-fatal):", e));
 
   return NextResponse.json({
     candidate: { ...inserted, latestFeedback: null },

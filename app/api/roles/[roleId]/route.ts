@@ -28,6 +28,7 @@ export async function GET(
       scoring_calibration_at,
       scoring_calibration_feedback_count,
       market_intelligence,
+      talent_flow_data,
       created_at,
       companies ( id, name, website_url, public_context )
     `
@@ -169,6 +170,7 @@ export async function GET(
       candidateCount: candidateCount ?? 0,
       feedbackSignalCount: feedbackCount ?? 0,
       marketIntelligence: role.market_intelligence ?? null,
+      talentFlowData: role.talent_flow_data ?? null,
       annotations,
       annotationInsights,
     },

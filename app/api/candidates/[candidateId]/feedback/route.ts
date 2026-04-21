@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 import { recomputeRoleCalibration } from "@/lib/recompute-calibration";
-import type { FeedbackType, RejectReason } from "@/lib/types";
+import { updateTalentFlowOnFeedback } from "@/lib/talent-flow-db";
+import type { FeedbackType, RejectReason, ResumeCompanyEntry } from "@/lib/types";
 
 const REJECT_REASONS: RejectReason[] = [
   "Overqualified",
@@ -59,7 +60,7 @@ export async function POST(
 
   const { data: candidate, error: cErr } = await supabase
     .from("candidates")
-    .select("id, role_id")
+    .select("id, role_id, analysis")
     .eq("id", candidateId)
     .single();
 
@@ -85,6 +86,11 @@ export async function POST(
       { status: 500 }
     );
   }
+
+  // Update talent flow counters — fire-and-forget, non-fatal
+  const companies = ((candidate.analysis as { companies?: ResumeCompanyEntry[] } | null)?.companies ?? []);
+  updateTalentFlowOnFeedback(candidate.role_id, companies, feedbackType)
+    .catch((e) => console.error("talent-flow feedback update failed (non-fatal):", e));
 
   const { count } = await supabase
     .from("candidate_feedback")

@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "backfill-talent-flow": "npx ts-node --project tsconfig.scripts.json scripts/backfill-talent-flow.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.87.0",

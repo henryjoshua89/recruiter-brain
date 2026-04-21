@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { FormEvent, Fragment, useCallback, useEffect, useState } from "react";
 import { normalizeScoreBreakdown } from "@/lib/score-breakdown";
-import type { BriefingSections, InternalContextPayload, MarketIntelligence } from "@/lib/types";
+import type { BriefingSections, InternalContextPayload, MarketIntelligence, TalentFlowData } from "@/lib/types";
 import CandidateCard, { type CandidateWithFeedback } from "./candidate-card";
 import ScoreWithTooltip from "./score-with-tooltip";
 
@@ -56,6 +56,7 @@ type RoleDetail = {
   annotations: RoleAnnotation[];
   annotationInsights: AnnotationInsightsData;
   marketIntelligence: MarketIntelligence | null;
+  talentFlowData: TalentFlowData | null;
 };
 
 type DuplicateState = {
@@ -206,6 +207,7 @@ export default function RoleWorkspace({ roleId }: { roleId: string }) {
         topConcerns: [],
       },
       marketIntelligence: (data.role.marketIntelligence as MarketIntelligence | null) ?? null,
+      talentFlowData: (data.role.talentFlowData as TalentFlowData | null) ?? null,
     });
     setFeedbackSignalCount(data.role.feedbackSignalCount ?? 0);
   }, [roleId]);
@@ -636,62 +638,116 @@ export default function RoleWorkspace({ roleId }: { roleId: string }) {
           <BriefingList title="Key deliverables & metrics" items={b.keyDeliverablesAndMetrics} />
           <BriefingList title="HM meeting prep" items={b.hmMeetingPrep} />
 
-          {/* Talent Flow Intelligence */}
-          {role.briefing.talentFlow ? (
-            <section className="rounded-xl border border-violet-200 bg-violet-50/40 p-5 shadow-sm">
-              <div className="mb-1 flex items-center gap-2">
+          {/* Talent Flow — two subsections: A) Market Intelligence, B) Your Pipeline */}
+          {(role.briefing.talentFlow || role.talentFlowData) ? (
+            <section className="rounded-xl border border-violet-200 bg-violet-50/40 p-5 shadow-sm space-y-5">
+              <div className="flex items-center gap-2">
                 <h2 className="text-sm font-semibold uppercase tracking-wide text-violet-800">
-                  Talent Flow · Market Intelligence
+                  Talent Flow
                 </h2>
               </div>
-              <p className="mb-4 text-[11px] text-violet-500">
-                Based on public market data. Updates when briefing is regenerated.
-              </p>
-              <div className="grid gap-4 sm:grid-cols-2">
-                {/* Feeder companies */}
-                <div className="rounded-lg border border-violet-100 bg-white p-3">
-                  <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-violet-700">Feeder companies</p>
-                  {role.briefing.talentFlow.feederCompanies.length > 0 ? (
-                    <ul className="space-y-1">
-                      {role.briefing.talentFlow.feederCompanies.map((co, i) => (
-                        <li key={i} className="flex items-start gap-1.5 text-xs text-slate-700">
-                          <span className="mt-0.5 shrink-0 text-violet-400">·</span>
-                          {co}
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <p className="text-xs italic text-slate-400">No data available.</p>
-                  )}
+
+              {/* Subsection A — Market Intelligence (Tavily + Claude) */}
+              {role.briefing.talentFlow ? (
+                <div>
+                  <p className="mb-3 text-[10px] font-semibold uppercase tracking-wide text-violet-600">
+                    Market Intelligence
+                  </p>
+                  <p className="mb-3 text-[11px] text-violet-400">
+                    Based on public market data. Updates when briefing is regenerated.
+                  </p>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="rounded-lg border border-violet-100 bg-white p-3">
+                      <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-violet-700">Feeder companies</p>
+                      {role.briefing.talentFlow.feederCompanies.length > 0 ? (
+                        <ul className="space-y-1">
+                          {role.briefing.talentFlow.feederCompanies.map((co, i) => (
+                            <li key={i} className="flex items-start gap-1.5 text-xs text-slate-700">
+                              <span className="mt-0.5 shrink-0 text-violet-400">·</span>{co}
+                            </li>
+                          ))}
+                        </ul>
+                      ) : <p className="text-xs italic text-slate-400">No data available.</p>}
+                    </div>
+                    <div className="rounded-lg border border-violet-100 bg-white p-3">
+                      <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-violet-700">Typical career path</p>
+                      {role.briefing.talentFlow.careerPath
+                        ? <p className="text-xs leading-relaxed text-slate-700">{role.briefing.talentFlow.careerPath}</p>
+                        : <p className="text-xs italic text-slate-400">No data available.</p>}
+                    </div>
+                    <div className="rounded-lg border border-violet-100 bg-white p-3">
+                      <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-violet-700">Sector movement patterns</p>
+                      {role.briefing.talentFlow.sectorPatterns
+                        ? <p className="text-xs leading-relaxed text-slate-700">{role.briefing.talentFlow.sectorPatterns}</p>
+                        : <p className="text-xs italic text-slate-400">No data available.</p>}
+                    </div>
+                    <div className="rounded-lg border border-violet-100 bg-white p-3">
+                      <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-violet-700">Where to look first</p>
+                      {role.briefing.talentFlow.sourcingDirection
+                        ? <p className="text-xs leading-relaxed text-slate-700">{role.briefing.talentFlow.sourcingDirection}</p>
+                        : <p className="text-xs italic text-slate-400">No data available.</p>}
+                    </div>
+                  </div>
                 </div>
-                {/* Career path */}
-                <div className="rounded-lg border border-violet-100 bg-white p-3">
-                  <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-violet-700">Typical career path</p>
-                  {role.briefing.talentFlow.careerPath ? (
-                    <p className="text-xs leading-relaxed text-slate-700">{role.briefing.talentFlow.careerPath}</p>
-                  ) : (
-                    <p className="text-xs italic text-slate-400">No data available.</p>
-                  )}
-                </div>
-                {/* Sector patterns */}
-                <div className="rounded-lg border border-violet-100 bg-white p-3">
-                  <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-violet-700">Sector movement patterns</p>
-                  {role.briefing.talentFlow.sectorPatterns ? (
-                    <p className="text-xs leading-relaxed text-slate-700">{role.briefing.talentFlow.sectorPatterns}</p>
-                  ) : (
-                    <p className="text-xs italic text-slate-400">No data available.</p>
-                  )}
-                </div>
-                {/* Sourcing direction */}
-                <div className="rounded-lg border border-violet-100 bg-white p-3">
-                  <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-violet-700">Where to look first</p>
-                  {role.briefing.talentFlow.sourcingDirection ? (
-                    <p className="text-xs leading-relaxed text-slate-700">{role.briefing.talentFlow.sourcingDirection}</p>
-                  ) : (
-                    <p className="text-xs italic text-slate-400">No data available.</p>
-                  )}
-                </div>
-              </div>
+              ) : null}
+
+              {/* Subsection B — Your Pipeline (live tracking) */}
+              {(() => {
+                const tfd = role.talentFlowData;
+                const rows = tfd
+                  ? Object.entries(tfd)
+                      .filter(([, e]) => e.total > 0)
+                      .sort((a, b) => b[1].conversion_rate - a[1].conversion_rate)
+                  : [];
+                return (
+                  <div>
+                    <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-violet-600">
+                      From your pipeline
+                    </p>
+                    <p className="mb-3 text-[11px] text-violet-400">
+                      Updates automatically as you review candidates.
+                    </p>
+                    {rows.length >= 3 ? (
+                      <div className="overflow-hidden rounded-lg border border-violet-100 bg-white">
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className="border-b border-violet-50 bg-violet-50/60">
+                              <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wide text-violet-700">Company</th>
+                              <th className="px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wide text-violet-700">Reviewed</th>
+                              <th className="px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wide text-violet-700">Shortlisted</th>
+                              <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wide text-violet-700">Conversion</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {rows.map(([company, entry]) => (
+                              <tr key={company} className="border-b border-violet-50 last:border-0 hover:bg-violet-50/30">
+                                <td className="px-3 py-2.5 font-medium text-slate-800">{company}</td>
+                                <td className="px-3 py-2.5 text-center text-slate-600">{entry.total}</td>
+                                <td className="px-3 py-2.5 text-center text-slate-600">{entry.shortlisted}</td>
+                                <td className="px-3 py-2.5">
+                                  <div className="flex items-center gap-2">
+                                    <div className="h-1.5 w-20 overflow-hidden rounded-full bg-violet-100">
+                                      <div
+                                        className="h-full rounded-full bg-emerald-500"
+                                        style={{ width: `${entry.conversion_rate}%` }}
+                                      />
+                                    </div>
+                                    <span className="text-slate-700">{entry.conversion_rate}%</span>
+                                  </div>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : (
+                      <p className="text-xs italic text-slate-400">
+                        Review more candidates to see your pipeline talent flow patterns.
+                      </p>
+                    )}
+                  </div>
+                );
+              })()}
             </section>
           ) : null}
 

@@ -112,3 +112,14 @@ export type RoleScoringCalibration = {
   feedbackCount: number;
   updatedAt: string;
 };
+
+/** One row in the live pipeline talent flow table. */
+export type TalentFlowEntry = {
+  total: number;
+  shortlisted: number;
+  rejected: number;
+  conversion_rate: number; // 0–100
+};
+
+/** Keys are company names from candidate analysis.companies[].name */
+export type TalentFlowData = Record<string, TalentFlowEntry>;
