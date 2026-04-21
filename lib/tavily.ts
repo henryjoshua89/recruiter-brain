@@ -1,5 +1,6 @@
 import { tavily } from "@tavily/core";
 import type { MarketIntelligence, MarketIntelligenceSearch, TalentFlowResearch } from "@/lib/types";
+export { heuristicRoleTitleFromJD, heuristicNameFromResume } from "@/lib/jd-utils";
 
 // ── Shared types ──────────────────────────────────────────────────────────────
 export type TavilyFootprint = {
@@ -221,30 +222,3 @@ export async function fetchUrlFootprint(
   }
 }
 
-/** Simple heuristic: grab a candidate name from the top lines of a resume. */
-export function heuristicNameFromResume(resumeText: string): string {
-  const lines = resumeText.split(/\n/).map((l) => l.trim()).filter(Boolean);
-  for (const line of lines.slice(0, 10)) {
-    if (
-      line.length >= 4 &&
-      line.length <= 60 &&
-      /^[A-Za-z][A-Za-z\s.\-]{2,58}$/.test(line) &&
-      line.split(/\s+/).length >= 2 &&
-      line.split(/\s+/).length <= 5
-    ) {
-      return line;
-    }
-  }
-  return "";
-}
-
-/** Extract role title from first usable line of a job description. */
-export function heuristicRoleTitleFromJD(jd: string): string {
-  const lines = jd.split(/\n/).map((l) => l.trim()).filter(Boolean);
-  for (const line of lines.slice(0, 8)) {
-    if (line.length >= 4 && line.length <= 120 && !line.includes(":")) {
-      return line;
-    }
-  }
-  return lines[0]?.slice(0, 100) ?? "Senior Role";
-}

@@ -1,5 +1,6 @@
 import { supabase } from "@/lib/supabase";
 import ApplicationForm from "@/components/application-form";
+import { heuristicRoleTitleFromJD } from "@/lib/jd-utils";
 import { notFound } from "next/navigation";
 
 export default async function ApplicationPage({
@@ -28,9 +29,7 @@ export default async function ApplicationPage({
   } | null;
 
   const jobDescription = role.job_description as string;
-  const roleTitle = jobDescription
-    ? jobDescription.split("\n")[0].slice(0, 80)
-    : "Open Role";
+  const roleTitle = heuristicRoleTitleFromJD(jobDescription ?? "", company?.name);
 
   return (
     <main className="min-h-screen bg-slate-50">
