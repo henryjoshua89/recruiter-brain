@@ -4,6 +4,7 @@ import Link from "next/link";
 import { FormEvent, Fragment, useCallback, useEffect, useState } from "react";
 import { normalizeScoreBreakdown } from "@/lib/score-breakdown";
 import type { BriefingSections, InternalContextPayload, MarketIntelligence, TalentFlowData } from "@/lib/types";
+import type { TalentFlowInsight } from "@/app/api/roles/[roleId]/talent-flow-insights/route";
 import CandidateCard, { type CandidateWithFeedback } from "./candidate-card";
 import ScoreWithTooltip from "./score-with-tooltip";
 
@@ -95,6 +96,28 @@ export default function RoleWorkspace({ roleId }: { roleId: string }) {
   const [comparisonRec, setComparisonRec] = useState<string | null>(null);
   const [comparisonLoading, setComparisonLoading] = useState(false);
   const [comparisonError, setComparisonError] = useState<string | null>(null);
+
+  // ── Talent flow insights state ────────────────────────────────────────────
+  const [tfInsights, setTfInsights] = useState<TalentFlowInsight[] | null>(null);
+  const [tfInsightsLoading, setTfInsightsLoading] = useState(false);
+  const [tfInsightsError, setTfInsightsError] = useState<string | null>(null);
+  const [tfInsightsGeneratedAt, setTfInsightsGeneratedAt] = useState<string | null>(null);
+
+  async function generateTalentFlowInsights() {
+    setTfInsightsLoading(true);
+    setTfInsightsError(null);
+    try {
+      const res = await fetch(`/api/roles/${roleId}/talent-flow-insights`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to generate insights.");
+      setTfInsights(data.insights as TalentFlowInsight[]);
+      setTfInsightsGeneratedAt(data.generatedAt as string);
+    } catch (e) {
+      setTfInsightsError(e instanceof Error ? e.message : "Something went wrong.");
+    } finally {
+      setTfInsightsLoading(false);
+    }
+  }
 
   // ── Edit Briefing modal state ─────────────────────────────────────────────
   const [showEditBriefing, setShowEditBriefing] = useState(false);
@@ -691,58 +714,159 @@ export default function RoleWorkspace({ roleId }: { roleId: string }) {
                 </div>
               ) : null}
 
-              {/* Subsection B — Your Pipeline (live tracking) */}
+              {/* Subsection B — Pipeline Intelligence (Claude-powered) */}
               {(() => {
                 const tfd = role.talentFlowData;
-                const rows = tfd
-                  ? Object.entries(tfd)
-                      .filter(([, e]) => e.total > 0)
-                      .sort((a, b) => b[1].conversion_rate - a[1].conversion_rate)
-                  : [];
+                const companyCount = tfd ? Object.keys(tfd).filter((k) => tfd[k].total > 0).length : 0;
+                const hasEnough = companyCount >= 5;
+
                 return (
                   <div>
-                    <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-violet-600">
-                      From your pipeline
-                    </p>
-                    <p className="mb-3 text-[11px] text-violet-400">
-                      Updates automatically as you review candidates.
-                    </p>
-                    {rows.length >= 3 ? (
-                      <div className="overflow-hidden rounded-lg border border-violet-100 bg-white">
-                        <table className="w-full text-xs">
-                          <thead>
-                            <tr className="border-b border-violet-50 bg-violet-50/60">
-                              <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wide text-violet-700">Company</th>
-                              <th className="px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wide text-violet-700">Reviewed</th>
-                              <th className="px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wide text-violet-700">Shortlisted</th>
-                              <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wide text-violet-700">Conversion</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {rows.map(([company, entry]) => (
-                              <tr key={company} className="border-b border-violet-50 last:border-0 hover:bg-violet-50/30">
-                                <td className="px-3 py-2.5 font-medium text-slate-800">{company}</td>
-                                <td className="px-3 py-2.5 text-center text-slate-600">{entry.total}</td>
-                                <td className="px-3 py-2.5 text-center text-slate-600">{entry.shortlisted}</td>
-                                <td className="px-3 py-2.5">
-                                  <div className="flex items-center gap-2">
-                                    <div className="h-1.5 w-20 overflow-hidden rounded-full bg-violet-100">
-                                      <div
-                                        className="h-full rounded-full bg-emerald-500"
-                                        style={{ width: `${entry.conversion_rate}%` }}
-                                      />
-                                    </div>
-                                    <span className="text-slate-700">{entry.conversion_rate}%</span>
-                                  </div>
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
+                    <div className="mb-3 flex items-center justify-between">
+                      <div>
+                        <p className="text-[10px] font-semibold uppercase tracking-wide text-violet-600">
+                          Pipeline Intelligence
+                        </p>
+                        {tfInsightsGeneratedAt ? (
+                          <p className="mt-0.5 text-[10px] text-violet-400">
+                            Generated {new Date(tfInsightsGeneratedAt).toLocaleString("en-IN", {
+                              day: "numeric", month: "short", hour: "2-digit", minute: "2-digit",
+                            })}
+                          </p>
+                        ) : null}
+                      </div>
+                      {hasEnough ? (
+                        <button
+                          type="button"
+                          onClick={generateTalentFlowInsights}
+                          disabled={tfInsightsLoading}
+                          className="flex items-center gap-1.5 rounded-lg border border-violet-200 bg-white px-3 py-1.5 text-xs font-medium text-violet-700 shadow-sm hover:bg-violet-50 disabled:opacity-60"
+                        >
+                          {tfInsightsLoading ? (
+                            <>
+                              <svg className="h-3 w-3 animate-spin" viewBox="0 0 24 24" fill="none">
+                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                              </svg>
+                              Analysing…
+                            </>
+                          ) : tfInsights ? (
+                            <>
+                              <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <path d="M1 4v6h6M23 20v-6h-6" /><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4-4.64 4.36A9 9 0 0 1 3.51 15" />
+                              </svg>
+                              Regenerate
+                            </>
+                          ) : (
+                            <>
+                              <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <path d="M9.663 17h4.673M12 3v1m6.364 1.636-.707.707M21 12h-1M4 12H3m3.343-5.657-.707-.707m2.828 9.9a5 5 0 1 1 7.072 0l-.548.547A3.374 3.374 0 0 0 14 18.469V19a2 2 0 1 1-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                              </svg>
+                              Generate Pipeline Insights
+                            </>
+                          )}
+                        </button>
+                      ) : null}
+                    </div>
+
+                    {!hasEnough ? (
+                      <p className="text-xs italic text-slate-400">
+                        Review more candidates to unlock pipeline intelligence. You need data from at least 5 company backgrounds.
+                      </p>
+                    ) : tfInsightsLoading ? (
+                      <div className="rounded-lg border border-violet-100 bg-white px-4 py-6 text-center">
+                        <p className="text-sm text-violet-600">Analysing your pipeline talent flow…</p>
+                        <p className="mt-1 text-xs text-slate-400">This usually takes 5–10 seconds.</p>
+                      </div>
+                    ) : tfInsightsError ? (
+                      <div className="rounded-lg border border-red-100 bg-red-50 px-4 py-3">
+                        <p className="text-xs text-red-700">{tfInsightsError}</p>
+                      </div>
+                    ) : tfInsights ? (
+                      <div className="space-y-2">
+                        {tfInsights.map((ins, i) => {
+                          const borderColor =
+                            ins.strength === "high" ? "border-blue-400" :
+                            ins.strength === "medium" ? "border-amber-400" :
+                            "border-slate-300";
+                          const strengthLabel =
+                            ins.strength === "high" ? "Strong signal" :
+                            ins.strength === "medium" ? "Moderate signal" :
+                            "Weak signal";
+                          const strengthColor =
+                            ins.strength === "high" ? "text-blue-600 bg-blue-50" :
+                            ins.strength === "medium" ? "text-amber-600 bg-amber-50" :
+                            "text-slate-500 bg-slate-100";
+
+                          const icon = (() => {
+                            switch (ins.type) {
+                              case "movement_pattern":
+                                return (
+                                  <svg className="h-4 w-4 shrink-0 text-violet-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                    <path d="M5 12h14M12 5l7 7-7 7" />
+                                  </svg>
+                                );
+                              case "feeder_archetype":
+                                return (
+                                  <svg className="h-4 w-4 shrink-0 text-violet-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                    <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><polyline points="9 22 9 12 15 12 15 22" />
+                                  </svg>
+                                );
+                              case "rejection_signal":
+                                return (
+                                  <svg className="h-4 w-4 shrink-0 text-violet-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                    <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" />
+                                  </svg>
+                                );
+                              case "surprise_signal":
+                                return (
+                                  <svg className="h-4 w-4 shrink-0 text-violet-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                    <path d="M12 3l1.5 4.5H18l-3.75 2.75 1.5 4.5L12 12l-3.75 2.75 1.5-4.5L6 7.5h4.5z" />
+                                  </svg>
+                                );
+                              case "career_path":
+                                return (
+                                  <svg className="h-4 w-4 shrink-0 text-violet-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                    <circle cx="6" cy="19" r="3" /><path d="M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H15" /><circle cx="18" cy="5" r="3" />
+                                  </svg>
+                                );
+                              case "sourcing_recommendation":
+                                return (
+                                  <svg className="h-4 w-4 shrink-0 text-violet-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                    <circle cx="12" cy="12" r="10" /><circle cx="12" cy="12" r="6" /><circle cx="12" cy="12" r="2" />
+                                  </svg>
+                                );
+                              case "poaching_pattern":
+                                return (
+                                  <svg className="h-4 w-4 shrink-0 text-violet-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                    <path d="M12 2C8 2 4 5 4 9c0 5.25 8 13 8 13s8-7.75 8-13c0-4-4-7-8-7z" /><circle cx="12" cy="9" r="2.5" />
+                                  </svg>
+                                );
+                            }
+                          })();
+
+                          return (
+                            <div
+                              key={i}
+                              className={`flex gap-3 rounded-lg border-l-4 bg-white p-3 shadow-sm ${borderColor}`}
+                            >
+                              <div className="mt-0.5">{icon}</div>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-xs leading-relaxed text-slate-800">{ins.insight}</p>
+                                <div className="mt-1.5 flex items-center gap-2">
+                                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${strengthColor}`}>
+                                    {strengthLabel}
+                                  </span>
+                                  <span className="text-[10px] text-slate-400 capitalize">{ins.type.replace(/_/g, " ")}</span>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
                     ) : (
-                      <p className="text-xs italic text-slate-400">
-                        Review more candidates to see your pipeline talent flow patterns.
+                      <p className="text-xs text-slate-400">
+                        {companyCount} companies tracked across {Object.values(tfd ?? {}).reduce((s, e) => s + e.total, 0)} candidates. Click &ldquo;Generate Pipeline Insights&rdquo; to analyse.
                       </p>
                     )}
                   </div>
