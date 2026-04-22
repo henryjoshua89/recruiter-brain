@@ -114,7 +114,7 @@ export default function RoleWorkspace({ roleId }: { roleId: string }) {
   const [reanalyseIds, setReanalyseIds] = useState<string[]>([]);
   const [reanalysing, setReanalysing] = useState(false);
   const [reanalyseProgress, setReanalyseProgress] = useState<{ current: number; total: number; name: string } | null>(null);
-  const [reanalyseResults, setReanalyseResults] = useState<{ name: string; oldScore: number; newScore: number }[]>([]);
+  const [reanalyseResults, setReanalyseResults] = useState<{ name: string; oldScore: number; newScore: number; error?: string }[]>([]);
   const [reanalyseError, setReanalyseError] = useState<string | null>(null);
 
   async function loadIntelligence() {
@@ -202,7 +202,7 @@ export default function RoleWorkspace({ roleId }: { roleId: string }) {
     setReanalyseResults([]);
 
     const selected = candidates.filter((c) => reanalyseIds.includes(c.id));
-    const results: { name: string; oldScore: number; newScore: number }[] = [];
+    const results: { name: string; oldScore: number; newScore: number; error?: string }[] = [];
 
     for (let i = 0; i < selected.length; i++) {
       const c = selected[i];
@@ -217,10 +217,18 @@ export default function RoleWorkspace({ roleId }: { roleId: string }) {
           const newScore = (data.candidate as { role_fit_score?: number }).role_fit_score ?? 0;
           results.push({ name, oldScore: c.role_fit_score ?? 0, newScore });
         } else {
-          results.push({ name, oldScore: c.role_fit_score ?? 0, newScore: -1 });
+          const errMsg = (data as { error?: string; details?: string }).error
+            ?? (data as { details?: string }).details
+            ?? `HTTP ${res.status}`;
+          results.push({ name, oldScore: c.role_fit_score ?? 0, newScore: -1, error: errMsg });
         }
-      } catch {
-        results.push({ name, oldScore: c.role_fit_score ?? 0, newScore: -1 });
+      } catch (e) {
+        results.push({
+          name,
+          oldScore: c.role_fit_score ?? 0,
+          newScore: -1,
+          error: e instanceof Error ? e.message : "Network error",
+        });
       }
     }
 
@@ -1310,16 +1318,21 @@ export default function RoleWorkspace({ roleId }: { roleId: string }) {
                     <p className="text-sm font-medium text-emerald-900 mb-2">Re-analysis complete</p>
                     <ul className="space-y-1">
                       {reanalyseResults.map((r, i) => (
-                        <li key={i} className="text-xs text-slate-700 flex items-center gap-2">
-                          <span className="font-medium">{r.name}</span>
-                          {r.newScore < 0 ? (
-                            <span className="text-red-500">failed</span>
-                          ) : (
-                            <span className={r.newScore > r.oldScore ? "text-emerald-700" : r.newScore < r.oldScore ? "text-amber-700" : "text-slate-500"}>
-                              {r.oldScore} → {r.newScore}
-                              {r.newScore > r.oldScore ? " ↑" : r.newScore < r.oldScore ? " ↓" : " (same)"}
-                            </span>
-                          )}
+                        <li key={i} className="text-xs text-slate-700 flex flex-col gap-0.5">
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium">{r.name}</span>
+                            {r.newScore < 0 ? (
+                              <span className="text-red-500 font-medium">failed</span>
+                            ) : (
+                              <span className={r.newScore > r.oldScore ? "text-emerald-700" : r.newScore < r.oldScore ? "text-amber-700" : "text-slate-500"}>
+                                {r.oldScore} → {r.newScore}
+                                {r.newScore > r.oldScore ? " ↑" : r.newScore < r.oldScore ? " ↓" : " (same)"}
+                              </span>
+                            )}
+                          </div>
+                          {r.error ? (
+                            <span className="text-red-500 pl-0">{r.error}</span>
+                          ) : null}
                         </li>
                       ))}
                     </ul>

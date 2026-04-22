@@ -192,12 +192,15 @@ export async function POST(
       }
     } else if (typeof pasted === "string" && pasted.trim()) {
       resumeText = pasted.trim();
-    } else {
+    } else if (!reanalyseCandidateId) {
+      // Only require file/text if this is NOT a re-analyse request
       return NextResponse.json(
         { error: "Provide a PDF file or resume text." },
         { status: 400 }
       );
     }
+    // If reanalyseCandidateId is set and no text provided, resume text is
+    // fetched from the DB below
   } else {
     const body = (await request.json()) as {
       resumeText?: string;
@@ -207,6 +210,35 @@ export async function POST(
     resumeText = body.resumeText?.trim() ?? "";
     reanalyseCandidateId = body.reanalyseCandidateId ?? null;
     forceNew = body.forceNew ?? false;
+  }
+
+  // ── For re-analyse: load stored resume text if none supplied ─────────────
+  if (reanalyseCandidateId && !resumeText) {
+    const { data: stored, error: storedErr } = await supabase
+      .from("candidates")
+      .select("resume_text")
+      .eq("id", reanalyseCandidateId)
+      .single();
+
+    if (storedErr || !stored) {
+      return NextResponse.json(
+        { error: `Candidate not found (id: ${reanalyseCandidateId}).` },
+        { status: 404 }
+      );
+    }
+
+    const storedText = (stored.resume_text as string | null)?.trim() ?? "";
+    if (!storedText || storedText.length < 40) {
+      return NextResponse.json(
+        {
+          error:
+            "No stored resume text for this candidate. Please re-upload their PDF to re-analyse.",
+        },
+        { status: 422 }
+      );
+    }
+
+    resumeText = storedText;
   }
 
   if (!resumeText || resumeText.length < 40) {
