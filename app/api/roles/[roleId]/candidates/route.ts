@@ -223,27 +223,40 @@ export async function POST(
     resumeText = resumeText.slice(0, MAX_RESUME_CHARS);
   }
 
-  const { data: role, error: roleError } = await supabase
-    .from("roles")
-    .select(
-      "id, job_description, internal_context, briefing, scoring_calibration, annotation_patterns"
-    )
-    .eq("id", roleId)
-    .single();
+  const [
+    { data: role, error: roleError },
+    { count: feedbackSignalCount },
+    { data: intelligenceRows },
+  ] = await Promise.all([
+    supabase
+      .from("roles")
+      .select("id, job_description, internal_context, briefing, scoring_calibration, annotation_patterns")
+      .eq("id", roleId)
+      .single(),
+    supabase
+      .from("candidate_feedback")
+      .select("*", { count: "exact", head: true })
+      .eq("role_id", roleId),
+    supabase
+      .from("role_intelligence")
+      .select("entry")
+      .eq("role_id", roleId)
+      .order("created_at", { ascending: true }),
+  ]);
 
   if (roleError || !role) {
     return NextResponse.json({ error: "Role not found." }, { status: 404 });
   }
 
-  const { count: feedbackSignalCount } = await supabase
-    .from("candidate_feedback")
-    .select("*", { count: "exact", head: true })
-    .eq("role_id", roleId);
-
   const signalCount = feedbackSignalCount ?? 0;
   const calibration =
     signalCount >= 5
       ? parseCalibrationFromRoleRow(role.scoring_calibration)
+      : null;
+
+  const roleIntelligence =
+    (intelligenceRows ?? []).length > 0
+      ? (intelligenceRows ?? []).map((r) => r.entry as string)
       : null;
 
   const analysis = await runResumeAnalysis({
@@ -255,6 +268,7 @@ export async function POST(
     calibration,
     feedbackSignalCount: signalCount,
     annotationPatterns: (role.annotation_patterns as string | null) ?? null,
+    roleIntelligence,
   });
 
   // ── Re-analyse existing candidate ──────────────────────────────────────────

@@ -79,6 +79,7 @@ export function buildResumeAnalysisUserPrompt(args: {
   calibration: RoleScoringCalibration | null;
   feedbackSignalCount: number;
   annotationPatterns?: string | null;
+  roleIntelligence?: string[] | null;
 }): string {
   const calBlock =
     args.calibration && args.calibration.roleFitScoringGuidance
@@ -97,6 +98,15 @@ CALIBRATION_FROM_PRIOR_FEEDBACK: There are ${args.feedbackSignalCount} feedback 
         : `
 CALIBRATION_FROM_PRIOR_FEEDBACK: None yet (fewer than 5 recruiter feedback signals on this role). Set role_fit_score equal to jd_fit_score and state that role fit will calibrate as more feedback is collected.
 `;
+
+  const intelligenceBlock =
+    args.roleIntelligence && args.roleIntelligence.length > 0
+      ? `
+ROLE INTELLIGENCE — EXPLICIT RECRUITER KNOWLEDGE (treat as hard constraints):
+The recruiter has recorded the following notes about this role. Each item is a firm insight, constraint, or preference that MUST directly influence scoring and rationale. If a candidate's profile contradicts a constraint, flag it in missingForRole and reflect it in both rationale fields.
+${args.roleIntelligence.map((e, i) => `${i + 1}. ${e}`).join("\n")}
+`
+      : "";
 
   const annotationBlock = args.annotationPatterns
     ? `
@@ -220,6 +230,7 @@ ${args.internalContextJson}
 RESUME TEXT:
 ${args.resumeText}
 
+${intelligenceBlock}
 ${calBlock}
 ${annotationBlock}`.trim();
 }
@@ -233,6 +244,7 @@ export async function runResumeAnalysis(args: {
   calibration: RoleScoringCalibration | null;
   feedbackSignalCount: number;
   annotationPatterns?: string | null;
+  roleIntelligence?: string[] | null;
 }): Promise<ResumeAnalysisPayload> {
   const client = new Anthropic({ apiKey: args.apiKey });
   const text = buildResumeAnalysisUserPrompt({
@@ -243,6 +255,7 @@ export async function runResumeAnalysis(args: {
     calibration: args.calibration,
     feedbackSignalCount: args.feedbackSignalCount,
     annotationPatterns: args.annotationPatterns,
+    roleIntelligence: args.roleIntelligence,
   });
 
   const message = await client.messages.create({

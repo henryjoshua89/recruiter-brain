@@ -85,6 +85,7 @@ export function buildBriefingPrompt({
   jobDescription,
   internalContext,
   marketIntelligenceContext,
+  roleIntelligence,
 }: {
   companyName: string;
   companyWebsite: string;
@@ -92,9 +93,14 @@ export function buildBriefingPrompt({
   jobDescription: string;
   internalContext: NewRolePayload["internalContext"];
   marketIntelligenceContext?: string | null;
+  roleIntelligence?: string[] | null;
 }): string {
   const companyBlock = formatCompanyContextForPrompt(companyContext);
   const today = briefingPromptDateIST();
+  const intelligenceBlock =
+    roleIntelligence && roleIntelligence.length > 0
+      ? `\nINPUT — ROLE INTELLIGENCE JOURNAL (recruiter's explicit notes — treat as hard constraints for this briefing):\n${roleIntelligence.map((e, i) => `${i + 1}. ${e}`).join("\n")}\n`
+      : "";
 
   return `
 Today's date (India, IST): ${today}
@@ -122,7 +128,7 @@ INPUT — INTERNAL CONTEXT (from the recruiter; treat as authoritative for polit
 - Team size and structure: ${internalContext.teamStructure}
 - Why previous person left: ${internalContext.whyLastPersonLeft || "Not provided"}
 
-${marketIntelligenceContext ? marketIntelligenceContext + "\n\n" : ""}INPUT — FULL JOB DESCRIPTION:
+${intelligenceBlock}${marketIntelligenceContext ? marketIntelligenceContext + "\n\n" : ""}INPUT — FULL JOB DESCRIPTION:
 ${jobDescription}
 
 ---
@@ -354,6 +360,7 @@ export async function generateBriefing(args: {
   jobDescription: string;
   internalContext: NewRolePayload["internalContext"];
   marketIntelligenceContext?: string | null;
+  roleIntelligence?: string[] | null;
 }): Promise<BriefingSections> {
   const client = new Anthropic({ apiKey: args.apiKey });
   const prompt = buildBriefingPrompt(args);

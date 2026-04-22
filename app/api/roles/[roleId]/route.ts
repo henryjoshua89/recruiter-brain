@@ -256,6 +256,18 @@ export async function PATCH(
     }
   }
 
+  // Fetch role intelligence entries (non-fatal if missing)
+  const { data: intelligenceRows } = await supabase
+    .from("role_intelligence")
+    .select("entry")
+    .eq("role_id", roleId)
+    .order("created_at", { ascending: true });
+
+  const roleIntelligence =
+    (intelligenceRows ?? []).length > 0
+      ? (intelligenceRows ?? []).map((r) => r.entry as string)
+      : null;
+
   // Generate new briefing using shared lib
   let parsed;
   try {
@@ -267,6 +279,7 @@ export async function PATCH(
       jobDescription: body.jobDescription.trim(),
       internalContext: body.internalContext,
       marketIntelligenceContext,
+      roleIntelligence,
     });
   } catch (e) {
     return NextResponse.json(

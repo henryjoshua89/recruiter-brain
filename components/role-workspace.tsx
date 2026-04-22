@@ -70,7 +70,7 @@ type DuplicateState = {
 };
 
 export default function RoleWorkspace({ roleId }: { roleId: string }) {
-  const [tab, setTab] = useState<"briefing" | "candidates">("candidates");
+  const [tab, setTab] = useState<"briefing" | "candidates" | "intelligence">("candidates");
   const [copiedLink, setCopiedLink] = useState(false);
   const [role, setRole] = useState<RoleDetail | null>(null);
   const [roleError, setRoleError] = useState<string | null>(null);
@@ -98,11 +98,153 @@ export default function RoleWorkspace({ roleId }: { roleId: string }) {
   const [comparisonLoading, setComparisonLoading] = useState(false);
   const [comparisonError, setComparisonError] = useState<string | null>(null);
 
+  // ── Intelligence Journal state ────────────────────────────────────────────
+  type IntelEntry = { id: string; entry: string; createdAt: string; updatedAt: string };
+  const [intelEntries, setIntelEntries] = useState<IntelEntry[]>([]);
+  const [intelLoading, setIntelLoading] = useState(false);
+  const [intelError, setIntelError] = useState<string | null>(null);
+  const [newEntryText, setNewEntryText] = useState("");
+  const [addingEntry, setAddingEntry] = useState(false);
+  const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
+  const [editingEntryText, setEditingEntryText] = useState("");
+  const [savingEntryId, setSavingEntryId] = useState<string | null>(null);
+  const [deletingEntryId, setDeletingEntryId] = useState<string | null>(null);
+
+  // ── Bulk re-analyse state ─────────────────────────────────────────────────
+  const [reanalyseIds, setReanalyseIds] = useState<string[]>([]);
+  const [reanalysing, setReanalysing] = useState(false);
+  const [reanalyseProgress, setReanalyseProgress] = useState<{ current: number; total: number; name: string } | null>(null);
+  const [reanalyseResults, setReanalyseResults] = useState<{ name: string; oldScore: number; newScore: number }[]>([]);
+  const [reanalyseError, setReanalyseError] = useState<string | null>(null);
+
+  async function loadIntelligence() {
+    setIntelLoading(true);
+    setIntelError(null);
+    try {
+      const res = await fetch(`/api/roles/${roleId}/intelligence`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to load intelligence.");
+      setIntelEntries(data.entries as IntelEntry[]);
+    } catch (e) {
+      setIntelError(e instanceof Error ? e.message : "Failed to load.");
+    } finally {
+      setIntelLoading(false);
+    }
+  }
+
+  async function handleAddEntry() {
+    const text = newEntryText.trim();
+    if (!text) return;
+    setAddingEntry(true);
+    setIntelError(null);
+    try {
+      const res = await fetch(`/api/roles/${roleId}/intelligence`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ entry: text }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to add entry.");
+      setIntelEntries((prev) => [data.entry as IntelEntry, ...prev]);
+      setNewEntryText("");
+    } catch (e) {
+      setIntelError(e instanceof Error ? e.message : "Failed to add.");
+    } finally {
+      setAddingEntry(false);
+    }
+  }
+
+  async function handleSaveEntry(id: string) {
+    const text = editingEntryText.trim();
+    if (!text) return;
+    setSavingEntryId(id);
+    setIntelError(null);
+    try {
+      const res = await fetch(`/api/roles/${roleId}/intelligence/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ entry: text }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to save.");
+      setIntelEntries((prev) =>
+        prev.map((e) => (e.id === id ? (data.entry as IntelEntry) : e))
+      );
+      setEditingEntryId(null);
+    } catch (e) {
+      setIntelError(e instanceof Error ? e.message : "Failed to save.");
+    } finally {
+      setSavingEntryId(null);
+    }
+  }
+
+  async function handleDeleteEntry(id: string) {
+    setDeletingEntryId(id);
+    setIntelError(null);
+    try {
+      const res = await fetch(`/api/roles/${roleId}/intelligence/${id}`, { method: "DELETE" });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error ?? "Failed to delete.");
+      }
+      setIntelEntries((prev) => prev.filter((e) => e.id !== id));
+    } catch (e) {
+      setIntelError(e instanceof Error ? e.message : "Failed to delete.");
+    } finally {
+      setDeletingEntryId(null);
+    }
+  }
+
+  async function handleBulkReanalyse() {
+    if (reanalyseIds.length === 0) return;
+    setReanalysing(true);
+    setReanalyseError(null);
+    setReanalyseResults([]);
+
+    const selected = candidates.filter((c) => reanalyseIds.includes(c.id));
+    const results: { name: string; oldScore: number; newScore: number }[] = [];
+
+    for (let i = 0; i < selected.length; i++) {
+      const c = selected[i];
+      const name = (c.analysis as { fullName?: string })?.fullName ?? `Candidate ${i + 1}`;
+      setReanalyseProgress({ current: i + 1, total: selected.length, name });
+      try {
+        const fd = new FormData();
+        fd.append("reanalyseCandidateId", c.id);
+        const res = await fetch(`/api/roles/${roleId}/candidates`, { method: "POST", body: fd });
+        const data = await res.json();
+        if (res.ok && data.candidate) {
+          const newScore = (data.candidate as { role_fit_score?: number }).role_fit_score ?? 0;
+          results.push({ name, oldScore: c.role_fit_score ?? 0, newScore });
+        } else {
+          results.push({ name, oldScore: c.role_fit_score ?? 0, newScore: -1 });
+        }
+      } catch {
+        results.push({ name, oldScore: c.role_fit_score ?? 0, newScore: -1 });
+      }
+    }
+
+    setReanalyseResults(results);
+    setReanalyseProgress(null);
+    setReanalysing(false);
+    setReanalyseIds([]);
+    // Refresh candidates list
+    try { await loadCandidates(); } catch { /* non-fatal */ }
+  }
+
   // ── Talent flow insights state ────────────────────────────────────────────
   const [tfInsights, setTfInsights] = useState<TalentFlowInsight[] | null>(null);
   const [tfInsightsLoading, setTfInsightsLoading] = useState(false);
   const [tfInsightsError, setTfInsightsError] = useState<string | null>(null);
   const [tfInsightsGeneratedAt, setTfInsightsGeneratedAt] = useState<string | null>(null);
+
+  // Load intelligence entries when Intelligence tab is first opened
+  useEffect(() => {
+    if (tab === "intelligence" && intelEntries.length === 0 && !intelLoading) {
+      loadIntelligence();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab]);
 
   // Seed persisted insights when role data arrives
   useEffect(() => {
@@ -629,6 +771,13 @@ export default function RoleWorkspace({ roleId }: { roleId: string }) {
             >
               Briefing
             </button>
+            <button
+              type="button"
+              onClick={() => setTab("intelligence")}
+              className={`rounded-md px-4 py-2 text-sm font-medium ${tab === "intelligence" ? "bg-blue-600 text-white" : "text-slate-700 hover:bg-slate-50"}`}
+            >
+              Intelligence
+            </button>
             <Link
               href={`/roles/${roleId}/dashboard`}
               className="rounded-md px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
@@ -948,6 +1097,237 @@ export default function RoleWorkspace({ roleId }: { roleId: string }) {
               </div>
             </section>
           ) : null}
+        </div>
+      ) : tab === "intelligence" ? (
+        /* ── Intelligence Journal tab ───────────────────────────────────────── */
+        <div className="space-y-6">
+          {/* Section 1 — Journal */}
+          <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-base font-semibold text-slate-950">Role Intelligence Journal</h2>
+                <p className="mt-0.5 text-sm text-slate-500">
+                  Notes that are injected as hard constraints into every resume analysis and briefing regeneration for this role.
+                </p>
+              </div>
+            </div>
+
+            {/* Add new entry */}
+            <div className="mt-4 flex flex-col gap-2">
+              <textarea
+                rows={3}
+                value={newEntryText}
+                onChange={(e) => setNewEntryText(e.target.value)}
+                placeholder="e.g. Only consider candidates with hands-on B2C product experience. No agency or consulting backgrounds."
+                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"
+              />
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={handleAddEntry}
+                  disabled={addingEntry || !newEntryText.trim()}
+                  className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+                >
+                  {addingEntry ? "Adding…" : "Add Insight"}
+                </button>
+                {intelError ? (
+                  <p className="text-sm text-red-600">{intelError}</p>
+                ) : null}
+              </div>
+            </div>
+
+            {/* Entry list */}
+            <div className="mt-5 space-y-3">
+              {intelLoading ? (
+                <div className="flex items-center gap-2 text-sm text-slate-500">
+                  <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-slate-300 border-t-blue-600" />
+                  Loading…
+                </div>
+              ) : intelEntries.length === 0 ? (
+                <p className="text-sm text-slate-400 italic">No intelligence entries yet. Add the first one above.</p>
+              ) : (
+                intelEntries.map((entry) => (
+                  <div
+                    key={entry.id}
+                    className="rounded-lg border border-slate-200 bg-slate-50 p-3"
+                  >
+                    {editingEntryId === entry.id ? (
+                      <div className="flex flex-col gap-2">
+                        <textarea
+                          rows={3}
+                          value={editingEntryText}
+                          onChange={(e) => setEditingEntryText(e.target.value)}
+                          className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"
+                        />
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleSaveEntry(entry.id)}
+                            disabled={savingEntryId === entry.id}
+                            className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+                          >
+                            {savingEntryId === entry.id ? "Saving…" : "Save"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setEditingEntryId(null)}
+                            className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex items-start justify-between gap-3">
+                        <p className="text-sm text-slate-800 leading-relaxed flex-1">{entry.entry}</p>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingEntryId(entry.id);
+                              setEditingEntryText(entry.entry);
+                            }}
+                            className="text-xs font-medium text-slate-500 hover:text-blue-600"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteEntry(entry.id)}
+                            disabled={deletingEntryId === entry.id}
+                            className="text-xs font-medium text-slate-500 hover:text-red-600 disabled:opacity-50"
+                          >
+                            {deletingEntryId === entry.id ? "Deleting…" : "Delete"}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+          </section>
+
+          {/* Section 2 — Bulk Re-analyse */}
+          <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+            <h2 className="text-base font-semibold text-slate-950">Bulk Re-analyse Candidates</h2>
+            <p className="mt-0.5 text-sm text-slate-500">
+              Select candidates to re-analyse with the current intelligence entries applied. Scores may change.
+            </p>
+
+            {candidates.length === 0 ? (
+              <p className="mt-4 text-sm text-slate-400 italic">No candidates yet for this role.</p>
+            ) : (
+              <>
+                <div className="mt-4 space-y-2">
+                  <div className="flex items-center gap-3 mb-3">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setReanalyseIds(
+                          reanalyseIds.length === candidates.length
+                            ? []
+                            : candidates.map((c) => c.id)
+                        )
+                      }
+                      className="text-xs font-medium text-blue-600 hover:text-blue-700"
+                    >
+                      {reanalyseIds.length === candidates.length ? "Deselect all" : "Select all"}
+                    </button>
+                    <span className="text-xs text-slate-400">{reanalyseIds.length} selected</span>
+                  </div>
+                  {candidates.map((c) => {
+                    const name = (c.analysis as { fullName?: string })?.fullName ?? "Unknown";
+                    const checked = reanalyseIds.includes(c.id);
+                    const result = reanalyseResults.find((r) => r.name === name);
+                    return (
+                      <label
+                        key={c.id}
+                        className="flex items-center gap-3 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2.5 cursor-pointer hover:bg-slate-100"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() =>
+                            setReanalyseIds((prev) =>
+                              prev.includes(c.id)
+                                ? prev.filter((id) => id !== c.id)
+                                : [...prev, c.id]
+                            )
+                          }
+                          disabled={reanalysing}
+                          className="h-4 w-4 rounded border-slate-300 text-blue-600"
+                        />
+                        <span className="flex-1 text-sm text-slate-800">{name}</span>
+                        <span className="text-xs text-slate-500">
+                          Score: {c.role_fit_score ?? "—"}
+                        </span>
+                        {result ? (
+                          <span
+                            className={`text-xs font-semibold ${
+                              result.newScore < 0
+                                ? "text-red-500"
+                                : result.newScore > result.oldScore
+                                ? "text-emerald-600"
+                                : result.newScore < result.oldScore
+                                ? "text-amber-600"
+                                : "text-slate-500"
+                            }`}
+                          >
+                            {result.newScore < 0
+                              ? "Error"
+                              : result.newScore === result.oldScore
+                              ? "Unchanged"
+                              : `→ ${result.newScore}`}
+                          </span>
+                        ) : null}
+                      </label>
+                    );
+                  })}
+                </div>
+
+                <div className="mt-4 flex items-center gap-4">
+                  <button
+                    type="button"
+                    onClick={handleBulkReanalyse}
+                    disabled={reanalysing || reanalyseIds.length === 0}
+                    className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+                  >
+                    {reanalysing ? "Re-analysing…" : `Re-analyse ${reanalyseIds.length > 0 ? reanalyseIds.length : ""} candidates`}
+                  </button>
+                  {reanalyseProgress ? (
+                    <p className="text-sm text-slate-600">
+                      {reanalyseProgress.current}/{reanalyseProgress.total} — {reanalyseProgress.name}
+                    </p>
+                  ) : null}
+                  {reanalyseError ? (
+                    <p className="text-sm text-red-600">{reanalyseError}</p>
+                  ) : null}
+                </div>
+
+                {reanalyseResults.length > 0 && !reanalysing ? (
+                  <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 p-4">
+                    <p className="text-sm font-medium text-emerald-900 mb-2">Re-analysis complete</p>
+                    <ul className="space-y-1">
+                      {reanalyseResults.map((r, i) => (
+                        <li key={i} className="text-xs text-slate-700 flex items-center gap-2">
+                          <span className="font-medium">{r.name}</span>
+                          {r.newScore < 0 ? (
+                            <span className="text-red-500">failed</span>
+                          ) : (
+                            <span className={r.newScore > r.oldScore ? "text-emerald-700" : r.newScore < r.oldScore ? "text-amber-700" : "text-slate-500"}>
+                              {r.oldScore} → {r.newScore}
+                              {r.newScore > r.oldScore ? " ↑" : r.newScore < r.oldScore ? " ↓" : " (same)"}
+                            </span>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+              </>
+            )}
+          </section>
         </div>
       ) : (
         <div className="space-y-8">
