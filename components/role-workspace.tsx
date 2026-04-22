@@ -58,6 +58,7 @@ type RoleDetail = {
   annotationInsights: AnnotationInsightsData;
   marketIntelligence: MarketIntelligence | null;
   talentFlowData: TalentFlowData | null;
+  talentFlowInsights: { insights: TalentFlowInsight[]; generatedAt: string } | null;
 };
 
 type DuplicateState = {
@@ -102,6 +103,14 @@ export default function RoleWorkspace({ roleId }: { roleId: string }) {
   const [tfInsightsLoading, setTfInsightsLoading] = useState(false);
   const [tfInsightsError, setTfInsightsError] = useState<string | null>(null);
   const [tfInsightsGeneratedAt, setTfInsightsGeneratedAt] = useState<string | null>(null);
+
+  // Seed persisted insights when role data arrives
+  useEffect(() => {
+    if (role?.talentFlowInsights) {
+      setTfInsights(role.talentFlowInsights.insights);
+      setTfInsightsGeneratedAt(role.talentFlowInsights.generatedAt);
+    }
+  }, [role?.talentFlowInsights]);
 
   async function generateTalentFlowInsights() {
     setTfInsightsLoading(true);
@@ -231,6 +240,7 @@ export default function RoleWorkspace({ roleId }: { roleId: string }) {
       },
       marketIntelligence: (data.role.marketIntelligence as MarketIntelligence | null) ?? null,
       talentFlowData: (data.role.talentFlowData as TalentFlowData | null) ?? null,
+      talentFlowInsights: (data.role.talentFlowInsights as { insights: TalentFlowInsight[]; generatedAt: string } | null) ?? null,
     });
     setFeedbackSignalCount(data.role.feedbackSignalCount ?? 0);
   }, [roleId]);

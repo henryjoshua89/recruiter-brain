@@ -184,5 +184,13 @@ Return only the JSON array. No markdown, no explanation.`;
     );
   }
 
-  return NextResponse.json({ insights, generatedAt: new Date().toISOString() });
+  const generatedAt = new Date().toISOString();
+
+  // Persist to the role so they survive navigation
+  await supabase
+    .from("roles")
+    .update({ talent_flow_insights: { insights, generatedAt } })
+    .eq("id", roleId);
+
+  return NextResponse.json({ insights, generatedAt });
 }
